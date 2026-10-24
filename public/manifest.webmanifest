@@ -1,0 +1,11 @@
+{
+  "name": "Central Comercial",
+  "short_name": "Central",
+  "description": "Prospecção, negociação e acompanhamento de projetos.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#101821",
+  "theme_color": "#e97935",
+  "lang": "pt-BR",
+  "icons": []
+}

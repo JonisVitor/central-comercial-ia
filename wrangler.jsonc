@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "central-comercial-ia",
+  "compatibility_date": "2026-10-24",
+  "pages_build_output_dir": "./dist",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "central-comercial-db",
+      "database_id": "39c258cc-789c-402f-a2ce-92e245aeb6f0",
+      "migrations_dir": "./migrations"
+    }
+  ]
+}
