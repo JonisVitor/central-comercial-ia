@@ -126,6 +126,7 @@ function statusTone(stage) {
 }
 
 function countdown(date) {
+  if (!date) return { text: 'sem data definida', overdue: false, urgent: false };
   const diff = new Date(date).getTime() - Date.now();
   const overdue = diff < 0;
   const absolute = Math.abs(diff);

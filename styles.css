@@ -129,19 +129,20 @@ h3 { margin-bottom: 4px; font-size: 15px; }
 .text-btn:hover { text-decoration: underline; }
 .lead-list, .deadline-list { display: grid; gap: 8px; }
 .lead-row, .deadline-row { display: flex; align-items: center; width: 100%; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; color: var(--text); background: var(--surface); text-align: left; appearance: none; }
+.deadline-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) minmax(140px, auto); }
 .lead-row:hover, .deadline-row:hover { border-color: var(--border-strong); background: var(--surface-2); }
 .lead-avatar { width: 34px; height: 34px; flex: 0 0 34px; display: grid; place-items: center; border-radius: 10px; color: var(--orange); background: var(--orange-soft); font-weight: 700; }
-.row-main { min-width: 0; flex: 1; }
-.row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.row-meta { margin-top: 4px; color: var(--text-3); font-size: 12px; line-height: 1.4; }
+.row-main { min-width: 0; flex: 1; display: grid; gap: 5px; }
+.row-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.row-meta { display: block; margin-top: 0; overflow: hidden; color: var(--text-3); font-size: 12px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
 .heat-mini { display: flex; align-items: center; gap: 6px; color: var(--orange); font: 500 12px 'DM Mono', monospace; }
 .heat-track { width: 70px; height: 5px; overflow: hidden; border-radius: 5px; background: var(--surface-3); }
 .heat-fill { height: 100%; border-radius: inherit; background: var(--orange); }
-.deadline-time { flex: 0 0 auto; text-align: right; }
+.deadline-time { display: grid; justify-items: end; gap: 5px; min-width: 0; flex: 0 0 auto; text-align: right; }
 .deadline-count { font: 500 12px 'DM Mono', monospace; color: var(--green); }
 .deadline-count.warning { color: var(--yellow); }
 .deadline-count.overdue { color: var(--red); }
-.deadline-kind { margin-top: 4px; color: var(--text-4); font-size: 11px; }
+.deadline-kind { margin-top: 0; color: var(--text-4); font-size: 11px; white-space: nowrap; }
 .empty-state { padding: 28px 10px; color: var(--text-3); text-align: center; font-size: 13px; }
 .empty-state strong { display: block; margin-bottom: 4px; color: var(--text-2); }
 .pipeline-panel { margin-top: 16px; }
@@ -295,6 +296,10 @@ h3 { margin-bottom: 4px; font-size: 15px; }
   .form-grid, .detail-grid { grid-template-columns: 1fr; }
   .field.full { grid-column: auto; }
   .modal { padding: 19px; }
+}
+@media (max-width: 560px) {
+  .deadline-row { grid-template-columns: 34px minmax(0, 1fr); }
+  .deadline-time { grid-column: 2; justify-items: start; text-align: left; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
