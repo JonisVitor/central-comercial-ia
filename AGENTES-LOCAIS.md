@@ -2,7 +2,9 @@
 
 ## O que esta integração faz
 
-O botão **Executar agentes** inicia seis processos independentes do Codex CLI, um para cada perfil interno em `.codex/agents/`. Eles recebem somente os registros reais carregados no navegador e produzem análises para revisão. O chat também pode iniciar o perfil **Pesquisador web**, que usa a busca web nativa do Codex CLI e apresenta links para revisão. Nenhuma dessas funções envia mensagens, altera etapas/fogo nem grava resultados no CRM.
+O botão **Executar agentes** inicia sete processos independentes do Codex CLI, um para cada perfil interno em `.codex/agents/`. Eles recebem somente os registros reais carregados no navegador e produzem análises para revisão. O chat também pode iniciar o perfil **Pesquisador web**, que usa a busca web nativa do Codex CLI e apresenta links para revisão. Nenhuma dessas funções envia mensagens, altera etapas/fogo nem grava resultados no CRM.
+
+Os playbooks adaptam, em português e para a venda de landing pages a negócios locais, ideias de qualificação, sinais, escrita, tratamento de respostas e análise do funil descritas pelo projeto open source Harvey. A licença e a atribuição estão em `THIRD-PARTY-NOTICES.md`. O aplicativo Harvey não está instalado aqui: seu README atual restringe o uso de Codex a macOS/Linux e não declara suporte a Windows.
 
 As chamadas usam a conta autenticada no Codex CLI. Não configuramos chave de API. A execução consome os limites de uso incluídos no plano Codex, portanto o botão é manual e não há agendamento contínuo.
 
@@ -19,7 +21,7 @@ As chamadas usam a conta autenticada no Codex CLI. Não configuramos chave de AP
 
 - O botão de conversa fica fixo no canto inferior direito do app.
 - Perguntas comuns são respondidas pelo Codex CLI autenticado. Cada resposta usa o plano Codex.
-- Um pedido explícito para analisar, revisar ou qualificar leads/projetos inicia os seis perfis em sequência e abre a tela **Agentes**.
+- Um pedido explícito para analisar, revisar ou qualificar leads/projetos inicia os sete perfis em sequência, incluindo o **Analista de funil**, e abre a tela **Agentes**.
 - Um comando direto como **“Pesquise pet shops em São Carlos com fontes”** inicia uma chamada de pesquisa web e mostra o agente e o resultado em **Agentes**.
 - O chat usa os registros reais carregados no navegador ou o JSON importado. Sem dados reais, peça para importar a exportação em **Agentes**.
 - A pesquisa usa `codex exec --search`, disponível no Codex CLI instalado. Ela usa a cota do plano Codex autenticado; não configuramos chave de API. Para consultar Maps, o agente pode trazer links públicos de pesquisa ou perfis encontrados, mas a confirmação do cadastro continua com o operador.
@@ -37,6 +39,7 @@ O Codex CLI precisa estar instalado e autenticado (`codex login status`). Não i
 - Resultados das últimas execuções ficam em `%TEMP%\CentralComercialIA\agent-runs.json` e não são enviados ao CRM.
 - O processo escuta somente em `127.0.0.1:4174`; o Vite encaminha as chamadas para ele.
 - O executor e a pesquisa ficam no computador onde foram iniciados. A versão Cloudflare e o celular ainda não têm acesso a eles; para isso será necessária uma ponte remota autenticada e um computador/servidor ativo.
-- A execução é sequencial: uma chamada de Codex para cada papel, em vez de um único modelo fingindo ser seis pessoas.
+- A execução é sequencial: uma chamada do Codex para cada papel, incluindo o Analyst adaptado do Harvey. A quantidade de chamadas usa mais cota do plano do que a v0.3.0.
+- O agente de mensagens prepara rascunhos; não existe um Sender automático. O operador revisa e envia manualmente.
 
 Se o projeto estiver em outro computador Windows, instale Node.js, o app Codex/Codex CLI, entre na conta e autentique o CLI antes de seguir os passos acima.

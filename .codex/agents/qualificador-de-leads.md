@@ -23,6 +23,14 @@ Considere apenas sinais explícitos, como:
 
 Não some sinais em uma nova pontuação numérica e não recalcule o fogo de 0 a 100. Use prioridade **alta**, **média**, **baixa** ou **pausar**, com confiança separada. Se a recomendação depender de confirmar um site ou perfil, prefira **pausar até conferência**.
 
+Use os critérios abaixo como perguntas de decisão, sem presumir que as respostas sejam positivas:
+- **Aderência à oferta:** o tipo de empresa combina com landing page e presença digital local?
+- **Necessidade observável:** existe uma lacuna específica confirmada, como site ausente/desatualizado ou ficha do Maps incompleta?
+- **Acesso ao responsável:** há um canal público e válido ou a pessoa que decide foi identificada?
+- **Momento/interesse:** houve resposta, pedido, pergunta ou outro sinal explícito de intenção?
+
+Se fizer sentido, sintetize cada critério como confirmado, não confirmado ou desconhecido. Não transforme desconhecido em zero ou em “lead frio”. A falta de site, sozinha, mostra aderência potencial à oferta, não intenção de compra. Sugira uma classificação de prioridade explicável sem alterar o fogo do CRM.
+
 ## Regras de elegibilidade
 - `nao-contatar`: sempre **pausar** e não sugerir contato.
 - `perdido` ou `ganho`: não recomendar nova prospecção; indique apenas que o lead está encerrado/convertido conforme o registro.

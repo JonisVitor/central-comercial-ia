@@ -76,6 +76,7 @@ const AGENT_ROLES = [
   ['mensagens', 'Rascunhos de mensagem', 'Prepara texto para revisão; nunca envia.', ['31%', '67%']],
   ['acompanhamento', 'Acompanhamento comercial', 'Organiza próximos passos a partir do histórico.', ['55%', '50%']],
   ['projetos', 'Gestão de projetos', 'Revisa prazos e etapas dos projetos cadastrados.', ['68%', '65%']],
+  ['analise', 'Analista de funil', 'Resume o fluxo e destaca pendências com base nos registros.', ['47%', '83%']],
   ['pesquisa', 'Pesquisador web', 'Pesquisa fontes públicas com o Codex e apresenta os links para revisão.', ['86%', '49%']]
 ];
 
@@ -366,7 +367,7 @@ function renderAgents() {
       <div><h1>Equipe de agentes</h1><p class="lede">Execuções reais do Codex CLI, sob demanda e com revisão humana.</p></div>
       <div class="agents-page-actions"><span class="simulation-badge ${agentRuntime.connected ? 'runtime-online' : ''}"><span class="simulation-dot"></span>${agentRuntime.connected ? 'Codex local conectado' : 'Executor local desconectado'}</span><button class="ghost-btn" type="button" data-agent-import>Importar JSON</button><input id="agent-data-file" type="file" accept=".json,application/json" hidden /><button class="primary-btn" type="button" data-agent-run ${!agentRuntime.connected || agentRuntime.running || (!realLeadCount && !realProjectCount) ? 'disabled' : ''}>${agentRuntime.running ? '⟳ Agentes trabalhando…' : '▶ Executar agentes'}</button></div>
     </header>
-    <p class="agent-demo-notice" role="note"><strong>Execução local e controlada.</strong> Os seis perfis internos analisam os dados sem editar o CRM. O Pesquisador web é acionado pelo chat, usa busca web do Codex e apresenta fontes para você conferir. Nada é salvo no CRM nem enviado a empresas. Cada execução consome o uso do plano Codex.</p>
+    <p class="agent-demo-notice" role="note"><strong>Execução local e controlada.</strong> Os sete perfis internos analisam os dados sem editar o CRM. O Pesquisador web é acionado pelo chat, usa busca web do Codex e apresenta fontes para você conferir. Nada é salvo no CRM nem enviado a empresas. Cada função consome o uso do plano Codex.</p>
     <div class="agent-status-strip" aria-label="Estados atuais dos agentes">
       <span class="agent-status-count"><i class="agent-state-dot working"></i><strong>${counts.working}</strong> trabalhando</span>
       <span class="agent-status-count"><i class="agent-state-dot approval"></i><strong>${counts.approval}</strong> concluídos</span>
@@ -381,12 +382,12 @@ function renderAgents() {
           ${AGENT_ROLES.map(([id, name, role, position]) => { const task = tasks.find((item) => item.id === id); const pinState = task?.state === 'working' ? 'working' : task?.state === 'error' ? 'error' : task?.state === 'complete' ? 'approval' : ''; return `<button class="office-agent-pin ${pinState} ${selectedAgentId === id ? 'selected' : ''}" type="button" data-agent-id="${id}" style="--pin-x:${position[0]};--pin-y:${position[1]}" aria-label="${name}. ${role}" aria-pressed="${selectedAgentId === id}"><i class="agent-state-dot ${pinState || 'idle'}"></i><span>${name}</span></button>`; }).join('')}
           <span class="office-scene-tag"><span class="scene-tag-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5zM4.5 7.8 12 12l7.5-4.2M12 12v8.5"/></svg></span>Central Comercial IA</span>
         </div>
-        <div class="agent-office-caption"><span>Seis funções independentes · Codex CLI</span><span>O escritório é uma visualização; o trabalho é executado no computador.</span></div>
+        <div class="agent-office-caption"><span>Sete funções independentes · Codex CLI</span><span>O escritório é uma visualização; o trabalho é executado no computador.</span></div>
       </section>
       <aside class="agent-inspector" aria-live="polite" aria-label="Detalhes do agente selecionado">
         <div class="agent-inspector-top"><div><span class="inspector-eyebrow">Função selecionada</span><h2>${esc(selected[1])}</h2><p>${esc(selected[2])}</p></div><span class="agent-state-label ${statusClass}"><i class="agent-state-dot ${statusClass}"></i>${statusLabel}</span></div>
         <div class="agent-task-block"><span class="inspector-label">Atividade</span><h3>${taskForSelected?.state === 'working' ? 'Esta função está analisando os dados permitidos.' : taskForSelected?.state === 'queued' ? 'Esta função começa quando as anteriores terminarem.' : taskForSelected?.state === 'complete' ? 'A análise terminou. O resultado legível está abaixo, nos detalhes da execução.' : taskForSelected?.state === 'error' ? 'A execução encontrou um erro. Veja a mensagem nos detalhes abaixo.' : agentRuntime.connected ? 'Peça uma análise no botão acima ou converse pelo assistente no canto da tela.' : 'Inicie o executor local para habilitar as análises.'}</h3></div>
-        <dl class="agent-detail-list"><div><dt>Dados permitidos</dt><dd>${selectedAgentId === 'projetos' ? `${realProjectCount} projetos sem marcação de demonstração` : `${realLeadCount} leads sem marcação de demonstração`}</dd></div><div><dt>Origem dos dados</dt><dd>${agentDataset ? `Arquivo local: ${esc(agentDataset.source)}` : 'Registros locais do app; importe o JSON exportado no painel Cloudflare para usar os dados online.'}</dd></div><div><dt>Limites</dt><dd>Somente leitura. A saída fica para sua revisão, sem gravação automática no CRM.</dd></div></dl>
+        <dl class="agent-detail-list"><div><dt>Dados permitidos</dt><dd>${selectedAgentId === 'projetos' ? `${realProjectCount} projetos sem marcação de demonstração` : selectedAgentId === 'analise' ? `${realLeadCount} leads, ${realProjectCount} projetos e mensagens fornecidos` : `${realLeadCount} leads sem marcação de demonstração`}</dd></div><div><dt>Origem dos dados</dt><dd>${agentDataset ? `Arquivo local: ${esc(agentDataset.source)}` : 'Registros locais do app; importe o JSON exportado no painel Cloudflare para usar os dados online.'}</dd></div><div><dt>Limites</dt><dd>Somente leitura. A saída fica para sua revisão, sem gravação automática no CRM.</dd></div></dl>
         <div class="agent-inspector-foot"><span class="agent-inspector-avatar" aria-hidden="true">AI</span><span><strong>Codex CLI · seu plano autenticado</strong><small>Uma execução por função, iniciada manualmente</small></span></div>
       </aside>
     </div>
@@ -469,7 +470,7 @@ async function runAgents() {
     if (!response.ok) throw new Error(payload.error || 'Não foi possível iniciar os agentes.');
     agentRuntime = payload;
     selectedRunId = payload.currentRun?.id || '';
-    toast('Seis processos do Codex CLI foram iniciados. Acompanhe os resultados nesta tela.');
+    toast('Sete processos do Codex CLI foram iniciados. Acompanhe os resultados nesta tela.');
   } catch (error) { toast(error.message); }
   await refreshAgentRuntime();
 }

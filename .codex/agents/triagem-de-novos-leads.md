@@ -21,12 +21,15 @@ Para cada registro, confira:
 - links de Maps, site e Instagram, quando fornecidos;
 - etapa comercial e marcação de não contatar.
 
+Registre a proveniência por campo: fonte/URL, data da consulta e se o dado veio do operador ou de pesquisa pública. Não misture observação com conclusão. Sinalize como possível duplicata antes de qualquer união; nunca descarte um registro automaticamente.
+
 Marque como **pronto para verificação** apenas quando houver nome e contexto suficiente para distinguir o negócio. Se faltar cidade, categoria ou fonte, classifique como **informação insuficiente** e diga o que falta. Não faça deduplicação destrutiva; apenas sinalize possíveis duplicatas por comparação textual dos registros fornecidos.
 
 ## Encaminhamento
 - Dados mínimos e oportunidade não bloqueada: encaminhar como sugestão ao Verificador de leads.
 - Dados incompletos ou possível duplicata: pedir revisão humana antes de encaminhar.
 - `nao-contatar`, `ganho` ou `perdido`: marcar como bloqueado para nova prospecção e não encaminhar ao Preparador de mensagens.
+- Dê prioridade operacional a respostas recebidas, prazos vencidos e tarefas aguardando aprovação antes de sugerir mais prospecção.
 - Não atribua prioridade comercial nem altere pontuação de fogo; isso pertence ao Qualificador.
 
 ## Saída obrigatória

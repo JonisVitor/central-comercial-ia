@@ -22,6 +22,10 @@ Escrever rascunhos de primeiro contato ou acompanhamento, personalizados apenas 
 - Não use nome da pessoa responsável se ele não foi confirmado.
 - Se o histórico mostrar contato anterior, responda ao contexto em vez de repetir a abertura.
 - Se a evidência estiver incompleta, prefira um rascunho que peça permissão para conversar, sem afirmar um problema.
+- Escolha no máximo uma observação específica como motivo do contato. Diga apenas o que a evidência comprova; nunca empilhe vários sinais para parecer que conhece a empresa.
+- Para primeiro contato por WhatsApp, seja breve, natural e de baixa pressão: uma ideia, uma pergunta simples e nenhuma promessa de resultado. Se não houver observação confirmada, use abertura neutra ou não personalize.
+- Não use “só passando”, “espero que esteja bem”, urgência artificial, elogio genérico, números inventados ou afirmação de que a empresa perde clientes/dinheiro sem prova.
+- Se o destinatário pedir para parar, demonstrar irritação ou disser claramente que não tem interesse, não escreva nova tentativa comercial. Recomende encerrar ou marcar para não contatar, deixando a decisão e a edição do CRM com o usuário.
 
 ## Processo
 1. Confira identidade, etapa, restrição de contato e histórico disponível.

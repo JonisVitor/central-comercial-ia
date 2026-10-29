@@ -22,7 +22,8 @@ Prospects are found and checked manually, including Google Maps and digital pres
 
 - The current web app is a Vite PWA hosted on Cloudflare Pages, with Pages Functions and D1 for shared online state.
 - Lead, message, and project workflows are editable from the app.
-- In local development, a separate Node runtime can run six Codex CLI profiles sequentially to analyze records and a seventh web researcher on demand using Codex CLI's native web-search tool.
+- In local development, a separate Node runtime can run seven Codex CLI profiles sequentially to analyze records and an eighth web researcher on demand using Codex CLI's native web-search tool.
+- Internal sales playbooks adapt Harvey-inspired prospect qualification, evidence-backed signals, human-reviewed writing, respectful reply handling, and funnel analysis. Harvey itself is not installed because its current Codex setup supports macOS/Linux rather than Windows.
 - The floating assistant is available only when the local Codex runtime is running. It can answer from supplied context, start a read-only internal analysis, or perform a public web search with cited links when explicitly asked.
 - The web researcher is read-only: it does not edit CRM data, publish sites, or contact businesses. Codex CLI's web search consumes the authenticated Codex plan allowance and does not require an API key.
 - The public Cloudflare app and mobile clients cannot connect to the local agent runtime until a protected remote execution bridge is designed and configured.
