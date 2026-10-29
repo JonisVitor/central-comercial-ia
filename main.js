@@ -1,7 +1,6 @@
 import './styles.css';
 
 const STORAGE_KEY = 'central-comercial-ia:v1';
-const AGENT_DATA_STORAGE = 'central-comercial-ia:agent-input:v1';
 const ASSISTANT_CHAT_STORAGE = 'central-comercial-ia:assistant-chat:v1';
 
 const LEAD_STAGES = [
@@ -55,7 +54,6 @@ function seedState() {
 }
 
 let state = loadState();
-let agentDataset = loadAgentDataset();
 let currentPage = 'overview';
 let currentLeadId = state.leads[0]?.id;
 let currentMessageId = state.messages[0]?.id;
@@ -98,12 +96,6 @@ function loadState() {
     }
   } catch (error) { console.warn('Não foi possível ler o armazenamento local.', error); }
   return { leads: [], projects: [], messages: [], settings: { demo: false, theme: 'dark' } };
-}
-function loadAgentDataset() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(AGENT_DATA_STORAGE));
-    return Array.isArray(saved?.leads) && Array.isArray(saved?.projects) ? saved : null;
-  } catch { return null; }
 }
 function loadAssistantMessages() {
   try {
@@ -257,9 +249,9 @@ async function sendAssistantMessage(rawText) {
   assistantBusy = true;
   saveAssistantMessages();
   renderAssistant();
-  const leads = agentDataset?.leads || state.leads.filter((lead) => lead.demo !== true && lead.demo !== 'demo');
-  const projects = agentDataset?.projects || state.projects.filter((project) => project.demo !== true && project.demo !== 'demo');
-  const messages = agentDataset?.messages || state.messages.filter((message) => leads.some((lead) => lead.id === message.leadId));
+  const leads = state.leads.filter((lead) => lead.demo !== true && lead.demo !== 'demo');
+  const projects = state.projects.filter((project) => project.demo !== true && project.demo !== 'demo');
+  const messages = state.messages.filter((message) => leads.some((lead) => lead.id === message.leadId));
   try {
     const response = await fetch('/api/agent-runtime/chat', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -327,7 +319,7 @@ function renderLeads() {
   const filtered = state.leads.filter((lead) => `${lead.name} ${lead.category} ${lead.city}`.toLowerCase().includes(leadSearch.toLowerCase()) && (leadFilter === 'todos' || lead.stage === leadFilter));
   const filters = [['todos', 'Todos'], ['quentes', '♨ Quentes'], ['novo', 'Novos'], ['contatado', 'Aguardando'], ['respondeu', 'Respondeu']];
   return `${pageHeader('Prospecção manual assistida', 'Leads com uma razão para conversar.', 'Cadastre empresas encontradas no Google Maps e deixe a evidência visível antes de priorizar o próximo contato.', '<button class="primary-btn" data-action="new-lead">+ Novo lead</button>')}
-    <div class="toolbar"><input class="search-input" id="lead-search" type="search" placeholder="Buscar empresa, nicho ou cidade" value="${esc(leadSearch)}" />${filters.map(([id, label]) => `<button class="filter-btn ${leadFilter === id ? 'active' : ''}" data-lead-filter="${id}">${label}</button>`).join('')}<span class="filter-spacer"></span><input id="lead-json-file" type="file" accept=".json,application/json" hidden /><button class="ghost-btn" data-action="import-leads-json">↑ Importar JSON</button><button class="ghost-btn" data-action="maps-task">⊕ Nova pesquisa Maps</button></div><p class="import-hint">Envie um arquivo JSON com uma lista <code>leads</code>. Duplicados são ignorados automaticamente.</p>
+    <div class="toolbar"><input class="search-input" id="lead-search" type="search" placeholder="Buscar empresa, nicho ou cidade" value="${esc(leadSearch)}" />${filters.map(([id, label]) => `<button class="filter-btn ${leadFilter === id ? 'active' : ''}" data-lead-filter="${id}">${label}</button>`).join('')}<span class="filter-spacer"></span><input id="lead-json-file" type="file" accept=".json,application/json" hidden /><button class="ghost-btn" data-action="import-leads-json">↑ Importar JSON</button><button class="ghost-btn" data-action="maps-task">⊕ Nova pesquisa Maps</button></div><p class="import-hint">Os dois importadores aceitam a lista <code>leads</code> ou o backup completo da Central. Leads, mensagens e projetos entram neste mesmo CRM local; duplicados são ignorados.</p>
     <div class="lead-grid">${filtered.length ? filtered.map(renderLeadCard).join('') : emptyState('Nenhum lead encontrado', 'Ajuste a busca ou cadastre uma nova empresa.')}</div>`;
 }
 function renderLeadCard(lead) {
@@ -353,8 +345,8 @@ function renderAgents() {
   const selected = AGENT_ROLES.find(([id]) => id === selectedAgentId) || AGENT_ROLES[0];
   const tasks = run?.tasks || [];
   const counts = { working: tasks.filter((task) => task.state === 'working').length, approval: tasks.filter((task) => task.state === 'complete').length, error: tasks.filter((task) => task.state === 'error').length };
-  const realLeadCount = agentDataset ? agentDataset.leads.length : state.leads.filter((lead) => lead.demo !== true && lead.demo !== 'demo').length;
-  const realProjectCount = agentDataset ? agentDataset.projects.length : state.projects.filter((project) => project.demo !== true && project.demo !== 'demo').length;
+  const realLeadCount = state.leads.filter((lead) => lead.demo !== true && lead.demo !== 'demo').length;
+  const realProjectCount = state.projects.filter((project) => project.demo !== true && project.demo !== 'demo').length;
   const taskForSelected = tasks.find((task) => task.id === selectedAgentId);
   const statusLabel = taskForSelected?.state === 'working' ? 'Executando' : taskForSelected?.state === 'complete' ? 'Concluído' : taskForSelected?.state === 'error' ? 'Erro' : taskForSelected?.state === 'queued' ? 'Na fila' : 'Aguardando execução';
   const statusClass = taskForSelected?.state === 'working' ? 'working' : taskForSelected?.state === 'complete' ? 'approval' : taskForSelected?.state === 'error' ? 'error' : 'idle';
@@ -368,7 +360,7 @@ function renderAgents() {
       <div><h1>Equipe de agentes</h1><p class="lede">Execuções reais do Codex CLI, sob demanda e com revisão humana.</p></div>
       <div class="agents-page-actions"><span class="simulation-badge ${agentRuntime.connected ? 'runtime-online' : ''}"><span class="simulation-dot"></span>${agentRuntime.connected ? 'Codex local conectado' : 'Executor local desconectado'}</span><button class="ghost-btn" type="button" data-agent-import>Importar JSON</button><input id="agent-data-file" type="file" accept=".json,application/json" hidden /><button class="primary-btn" type="button" data-agent-run ${!agentRuntime.connected || agentRuntime.running || (!realLeadCount && !realProjectCount) ? 'disabled' : ''}>${agentRuntime.running ? '⟳ Agentes trabalhando…' : '▶ Executar agentes'}</button></div>
     </header>
-      <p class="agent-demo-notice" role="note"><strong>Fluxo local do Codex.</strong> Peça um nicho e uma cidade pelo chat para pesquisar, verificar, qualificar e preparar mensagem e roteiro. Leads aprovados entram no painel aguardando sua revisão; o envio e a criação das LPs continuam com você. Cada execução consome o limite do plano Codex e a busca pública não garante cobertura completa do Maps.</p>
+      <p class="agent-demo-notice" role="note"><strong>Fluxo local do Codex.</strong> Peça um nicho e uma cidade pelo chat para pesquisar, verificar, qualificar e preparar mensagem e roteiro. Leads aprovados entram no painel aguardando sua revisão; o envio e a criação das LPs continuam com você. Cada execução consome o limite do plano Codex e a busca pública não garante cobertura completa do Maps. Importar JSON aqui adiciona os registros ao mesmo CRM usado em Prospecção.</p>
     <div class="agent-status-strip" aria-label="Estados atuais dos agentes">
       <span class="agent-status-count"><i class="agent-state-dot working"></i><strong>${counts.working}</strong> trabalhando</span>
       <span class="agent-status-count"><i class="agent-state-dot approval"></i><strong>${counts.approval}</strong> concluídos</span>
@@ -388,7 +380,7 @@ function renderAgents() {
       <aside class="agent-inspector" aria-live="polite" aria-label="Detalhes do agente selecionado">
         <div class="agent-inspector-top"><div><span class="inspector-eyebrow">Função selecionada</span><h2>${esc(selected[1])}</h2><p>${esc(selected[2])}</p></div><span class="agent-state-label ${statusClass}"><i class="agent-state-dot ${statusClass}"></i>${statusLabel}</span></div>
         <div class="agent-task-block"><span class="inspector-label">Atividade</span><h3>${taskForSelected?.state === 'working' ? 'Esta função está analisando os dados permitidos.' : taskForSelected?.state === 'queued' ? 'Esta função começa quando as anteriores terminarem.' : taskForSelected?.state === 'complete' ? 'A análise terminou. O resultado legível está abaixo, nos detalhes da execução.' : taskForSelected?.state === 'error' ? 'A execução encontrou um erro. Veja a mensagem nos detalhes abaixo.' : agentRuntime.connected ? 'Peça uma análise no botão acima ou converse pelo assistente no canto da tela.' : 'Inicie o executor local para habilitar as análises.'}</h3></div>
-        <dl class="agent-detail-list"><div><dt>Dados desta execução</dt><dd>${selectedAgentId === 'projetos' ? `${selectedRun?.projectCount ?? realProjectCount} projetos analisados` : selectedAgentId === 'analise' ? `${selectedRun?.leadCount ?? realLeadCount} leads e ${selectedRun?.projectCount ?? realProjectCount} projetos analisados` : `${selectedRun?.leadCount ?? realLeadCount} leads analisados`}</dd></div><div><dt>Disponíveis agora</dt><dd>${realLeadCount} leads · ${realProjectCount} projetos${agentDataset ? ` · arquivo: ${esc(agentDataset.source)}` : ' · armazenamento deste navegador'}</dd></div><div><dt>Limites</dt><dd>Esta execução lê os dados informados e salva o resultado no histórico local. Confira a origem antes de iniciar outra análise.</dd></div></dl>
+        <dl class="agent-detail-list"><div><dt>Dados desta execução</dt><dd>${selectedAgentId === 'projetos' ? `${selectedRun?.projectCount ?? realProjectCount} projetos analisados` : selectedAgentId === 'analise' ? `${selectedRun?.leadCount ?? realLeadCount} leads e ${selectedRun?.projectCount ?? realProjectCount} projetos analisados` : `${selectedRun?.leadCount ?? realLeadCount} leads analisados`}</dd></div><div><dt>Disponíveis agora</dt><dd>${realLeadCount} leads · ${realProjectCount} projetos · CRM deste navegador</dd></div><div><dt>Limites</dt><dd>Esta execução lê os dados informados e salva o resultado no histórico local. Confira a origem antes de iniciar outra análise.</dd></div></dl>
         <div class="agent-inspector-foot"><span class="agent-inspector-avatar" aria-hidden="true">AI</span><span><strong>Codex CLI · seu plano autenticado</strong><small>Uma execução por função, iniciada manualmente</small></span></div>
       </aside>
     </div>
@@ -497,16 +489,16 @@ function autoImportProspectingRuns() {
 async function runAgents() {
   const button = el('[data-agent-run]');
   if (!button || agentRuntime.running) return;
-  const leads = agentDataset?.leads || state.leads.filter((lead) => lead.demo !== true && lead.demo !== 'demo');
-  const projects = agentDataset?.projects || state.projects.filter((project) => project.demo !== true && project.demo !== 'demo');
-  const messages = agentDataset?.messages || state.messages.filter((message) => leads.some((lead) => lead.id === message.leadId));
+  const leads = state.leads.filter((lead) => lead.demo !== true && lead.demo !== 'demo');
+  const projects = state.projects.filter((project) => project.demo !== true && project.demo !== 'demo');
+  const messages = state.messages.filter((message) => leads.some((lead) => lead.id === message.leadId));
   if (!leads.length && !projects.length) { toast('Não há leads ou projetos reais. Importe/cadastre dados reais antes de executar.'); return; }
   button.disabled = true;
   button.textContent = '⟳ Iniciando…';
   try {
     const response = await fetch('/api/agent-runtime/run', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source: agentDataset?.source || 'Painel local', leads, projects, messages })
+      body: JSON.stringify({ source: 'CRM local', leads, projects, messages })
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || 'Não foi possível iniciar os agentes.');
@@ -517,23 +509,7 @@ async function runAgents() {
   await refreshAgentRuntime();
 }
 async function importAgentDataset(event) {
-  const input = event.currentTarget;
-  const file = input.files?.[0];
-  input.value = '';
-  if (!file) return;
-  if (file.size > 2_000_000) { toast('O JSON ultrapassa 2 MB.'); return; }
-  try {
-    const imported = JSON.parse(await file.text());
-    if (!Array.isArray(imported.leads) || !Array.isArray(imported.projects)) throw new Error('Selecione o JSON exportado pela Central Comercial.');
-    const leads = imported.leads.filter((lead) => lead && lead.demo !== true && lead.demo !== 'demo');
-    const projects = imported.projects.filter((project) => project && project.demo !== true && project.demo !== 'demo');
-    if (leads.length > 30 || projects.length > 15) throw new Error('O lote deve ter até 30 leads e 15 projetos.');
-    if (!leads.length && !projects.length) throw new Error('Esse arquivo não contém leads ou projetos reais.');
-    agentDataset = { source: file.name, importedAt: new Date().toISOString(), leads, projects, messages: Array.isArray(imported.messages) ? imported.messages : [] };
-    localStorage.setItem(AGENT_DATA_STORAGE, JSON.stringify(agentDataset));
-    renderPages();
-    toast(`${leads.length} leads e ${projects.length} projetos prontos para análise. O CRM online não foi alterado.`);
-  } catch (error) { toast(error.message || 'Não foi possível ler esse JSON.'); }
+  return importCRMJsonFile(event);
 }
 function navigate(page) { currentPage = page; renderShell(); renderPages(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
 function toggleTheme() { state.settings.theme = state.settings.theme === 'light' ? 'dark' : 'light'; persist(); applyTheme(); renderShell(); renderPages(); toast(state.settings.theme === 'light' ? 'Modo claro ativado.' : 'Modo escuro ativado.'); }
@@ -544,6 +520,9 @@ function openLeadModal() { modal(`<div class="modal-header"><div><p class="page-
 function saveLead(event) { event.preventDefault(); const form = new FormData(event.target); const lead = { id: uid('lead'), name: form.get('name'), category: form.get('category'), city: form.get('city'), phone: form.get('phone'), website: form.get('website'), websiteUrl: '', maps: form.get('maps'), mapsUrl: '', instagramUrl: '', instagramStatus: 'Não verificado', heat: Number(form.get('heat')), stage: 'novo', evidence: form.get('evidence'), source: 'Google Maps · consulta manual', notes: form.get('notes'), nextAction: 'Verificar e qualificar', responseDue: null, createdAt: isoDate(Date.now()), demo: false }; state.leads.unshift(lead); state.messages.unshift({ id: uid('message'), leadId: lead.id, text: `Olá, ${lead.name}! Vi o perfil de vocês no Google e queria mostrar uma ideia simples para melhorar a apresentação do negócio online. Posso te enviar para você dar uma olhada?`, sentAt: null }); state.settings.demo = false; persist(); currentLeadId = lead.id; closeModal(); toast('Lead cadastrado e mensagem inicial preparada.'); renderPages(); }
 function importKey(value) { return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
 async function importLeadsJsonFile(event) {
+  return importCRMJsonFile(event);
+}
+async function importCRMJsonFile(event) {
   const input = event.currentTarget;
   const file = input.files?.[0];
   if (!file) return;
@@ -553,15 +532,22 @@ async function importLeadsJsonFile(event) {
     const payload = JSON.parse(await file.text());
     const rows = Array.isArray(payload) ? payload : payload?.leads;
     if (!Array.isArray(rows) || rows.length === 0 || rows.length > 250) throw new Error('O arquivo precisa conter de 1 a 250 empresas em uma lista chamada "leads" ou ser uma lista JSON.');
-    const known = new Set(state.leads.map((lead) => `${importKey(lead.name)}|${importKey(lead.city)}`));
+    const sourceProjects = Array.isArray(payload?.projects) ? payload.projects.filter((project) => project && project.demo !== true && project.demo !== 'demo') : [];
+    if (sourceProjects.length > 15) throw new Error('O arquivo pode ter no máximo 15 projetos.');
+    const known = new Map(state.leads.map((lead) => [`${importKey(lead.name)}|${importKey(lead.city)}`, lead]));
     const added = [];
+    const sourceForAdded = new Map();
+    const importedLeadIds = new Map();
     let duplicates = 0;
     let invalid = 0;
-    for (const item of rows) {
+    for (const item of rows.filter((lead) => lead && lead.demo !== true && lead.demo !== 'demo')) {
       if (!item || typeof item !== 'object' || !String(item.name || '').trim() || !String(item.category || '').trim() || !String(item.city || '').trim()) { invalid += 1; continue; }
       const key = `${importKey(item.name)}|${importKey(item.city)}`;
-      if (known.has(key)) { duplicates += 1; continue; }
-      known.add(key);
+      if (known.has(key)) {
+        duplicates += 1;
+        if (item.id) importedLeadIds.set(item.id, known.get(key).id);
+        continue;
+      }
       const websiteOptions = ['Não verificado', 'Não encontrado', 'Encontrado'];
       const mapsOptions = ['Não verificado', 'Não encontrado', 'Cadastro incompleto', 'Cadastro regular', 'Cadastro forte'];
       const heat = Number(item.heat);
@@ -574,20 +560,53 @@ async function importLeadsJsonFile(event) {
         maps: mapsOptions.includes(item.maps) ? item.maps : 'Não verificado', heat: Number.isFinite(heat) ? Math.max(0, Math.min(100, Math.round(heat))) : 50,
         stage, evidence: String(item.evidence || 'Importado de um arquivo JSON; confirmar as informações antes do contato.').trim(),
         source: String(item.source || 'Importação JSON').trim(), sourceUrl: String(item.sourceUrl || '').trim(), notes: String(item.notes || '').trim(),
-        nextAction: String(item.nextAction || 'Confirmar dados públicos e presença digital').trim(), responseDue: null,
-        createdAt: isoDate(Date.now()), demo: false
+        nextAction: String(item.nextAction || 'Confirmar dados públicos e presença digital').trim(), heatRationale: String(item.heatRationale || ''),
+        salesScript: String(item.salesScript || ''), responseDue: Number.isNaN(Date.parse(item.responseDue)) ? null : item.responseDue,
+        createdAt: Number.isNaN(Date.parse(item.createdAt)) ? isoDate(Date.now()) : item.createdAt, demo: false
       };
       added.push(lead);
+      sourceForAdded.set(lead.id, item);
+      known.set(key, lead);
+      if (item.id) importedLeadIds.set(item.id, lead.id);
     }
     if (added.length) {
       state.leads.unshift(...added);
-      state.messages.unshift(...added.map((lead) => ({ id: uid('message'), leadId: lead.id, text: `Olá, ${lead.name}! Encontrei o negócio de vocês em uma pesquisa local e gostaria de apresentar uma ideia simples para mostrar melhor os serviços e facilitar o contato. Posso te enviar para você dar uma olhada?`, sentAt: null })));
+      const importedMessages = [];
+      for (const lead of added) {
+        const sourceLead = sourceForAdded.get(lead.id);
+        const saved = (Array.isArray(payload?.messages) ? payload.messages : []).filter((message) => message?.leadId === sourceLead?.id && typeof message.text === 'string' && message.text.trim());
+        if (saved.length) {
+          saved.forEach((message) => importedMessages.push({ id: uid('message'), leadId: lead.id, text: message.text.trim(), sentAt: message.sentAt || null }));
+        } else {
+          importedMessages.push({ id: uid('message'), leadId: lead.id, text: `Olá, ${lead.name}! Encontrei o negócio de vocês em uma pesquisa local e gostaria de apresentar uma ideia simples para mostrar melhor os serviços e facilitar o contato. Posso te enviar para você dar uma olhada?`, sentAt: null });
+        }
+      }
+      state.messages.unshift(...importedMessages);
+    }
+    const knownProjects = new Set(state.projects.map((project) => importKey(project.name)));
+    let addedProjects = 0;
+    for (const item of sourceProjects) {
+      const name = String(item.name || '').trim();
+      if (!name || knownProjects.has(importKey(name))) { if (name) duplicates += 1; else invalid += 1; continue; }
+      const stage = PROJECT_STAGES.some(([id]) => id === item.stage) ? item.stage : 'confirmado';
+      const originalLeadId = String(item.leadId || '');
+      const mappedLeadId = importedLeadIds.get(originalLeadId) || '';
+      state.projects.push({
+        id: uid('project'), leadId: mappedLeadId, name, service: String(item.service || 'Landing page + hospedagem anual'), stage,
+        startDate: Number.isNaN(Date.parse(item.startDate)) ? null : item.startDate,
+        dueDate: Number.isNaN(Date.parse(item.dueDate)) ? null : item.dueDate,
+        notes: String(item.notes || ''), demo: false
+      });
+      knownProjects.add(importKey(name));
+      addedProjects += 1;
+    }
+    if (added.length || addedProjects) {
       state.settings.demo = false;
-      currentLeadId = added[0].id;
+      currentLeadId = added[0]?.id || currentLeadId;
       persist();
       renderPages();
     }
-    const summary = [`${added.length} importado${added.length === 1 ? '' : 's'}`, `${duplicates} duplicado${duplicates === 1 ? '' : 's'} ignorado${duplicates === 1 ? '' : 's'}`, invalid ? `${invalid} inválido${invalid === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ');
+    const summary = [`${added.length} lead${added.length === 1 ? '' : 's'} adicionado${added.length === 1 ? '' : 's'}`, `${addedProjects} projeto${addedProjects === 1 ? '' : 's'} adicionado${addedProjects === 1 ? '' : 's'}`, `${duplicates} duplicado${duplicates === 1 ? '' : 's'} ignorado${duplicates === 1 ? '' : 's'}`, invalid ? `${invalid} inválido${invalid === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ');
     toast(summary);
   } catch (error) {
     toast(error instanceof SyntaxError ? 'Não consegui ler o JSON. Confira a sintaxe e tente novamente.' : error.message || 'Não foi possível importar este arquivo.');
@@ -741,7 +760,7 @@ function importResearchCandidates(runId) {
   if (!run?.candidates?.length) { toast('Esta pesquisa não contém empresas importáveis.'); return; }
   const selected = [...researchSelection].filter((key) => key.startsWith(`${runId}:`)).map((key) => Number(key.slice(runId.length + 1))).filter((index) => Number.isInteger(index) && run.candidates[index]);
   if (!selected.length) { toast('Marque pelo menos uma empresa para importar.'); return; }
-  const known = new Set([...state.leads, ...(agentDataset?.leads || [])].map((lead) => `${importKey(lead.name)}|${importKey(lead.city)}`));
+  const known = new Set(state.leads.map((lead) => `${importKey(lead.name)}|${importKey(lead.city)}`));
   const proposed = [];
   let duplicates = 0;
   for (const index of selected) {
