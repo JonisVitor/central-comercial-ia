@@ -348,6 +348,8 @@ function renderAgents() {
   const activeRun = agentRuntime.currentRun;
   const run = activeRun || agentRuntime.history?.find((item) => item.id === selectedRunId) || agentRuntime.history?.[0];
   if (activeRun) selectedRunId = activeRun.id;
+  const history = agentRuntime.history || [];
+  const selectedRun = activeRun || history.find((item) => item.id === selectedRunId) || run;
   const selected = AGENT_ROLES.find(([id]) => id === selectedAgentId) || AGENT_ROLES[0];
   const tasks = run?.tasks || [];
   const counts = { working: tasks.filter((task) => task.state === 'working').length, approval: tasks.filter((task) => task.state === 'complete').length, error: tasks.filter((task) => task.state === 'error').length };
@@ -356,8 +358,6 @@ function renderAgents() {
   const taskForSelected = tasks.find((task) => task.id === selectedAgentId);
   const statusLabel = taskForSelected?.state === 'working' ? 'Executando' : taskForSelected?.state === 'complete' ? 'Concluído' : taskForSelected?.state === 'error' ? 'Erro' : taskForSelected?.state === 'queued' ? 'Na fila' : 'Aguardando execução';
   const statusClass = taskForSelected?.state === 'working' ? 'working' : taskForSelected?.state === 'complete' ? 'approval' : taskForSelected?.state === 'error' ? 'error' : 'idle';
-  const history = agentRuntime.history || [];
-  const selectedRun = activeRun || history.find((item) => item.id === selectedRunId) || run;
   const completedCount = selectedRun?.tasks?.filter((task) => task.state === 'complete').length || 0;
   const errorCount = selectedRun?.tasks?.filter((task) => task.state === 'error').length || 0;
   const detailState = taskForSelected?.state === 'working' ? 'Trabalhando agora' : taskForSelected?.state === 'complete' ? 'Concluído' : taskForSelected?.state === 'error' ? 'Precisa de atenção' : taskForSelected?.state === 'queued' ? 'Aguardando sua vez' : 'Ainda sem execução';
@@ -373,7 +373,7 @@ function renderAgents() {
       <span class="agent-status-count"><i class="agent-state-dot working"></i><strong>${counts.working}</strong> trabalhando</span>
       <span class="agent-status-count"><i class="agent-state-dot approval"></i><strong>${counts.approval}</strong> concluídos</span>
       <span class="agent-status-count"><i class="agent-state-dot error"></i><strong>${counts.error}</strong> com erro</span>
-      <span class="agent-status-count agent-total-count"><strong>${realLeadCount}</strong> leads disponíveis · <strong>${realProjectCount}</strong> projetos ${agentDataset ? 'no JSON local' : 'neste navegador'}</span>
+      <span class="agent-status-count agent-total-count"><strong>${realLeadCount}</strong> leads disponíveis agora · <strong>${selectedRun?.leadCount ?? 0}</strong> analisados nesta execução · <strong>${realProjectCount}</strong> projetos disponíveis</span>
     </div>
     <div class="agents-workspace">
       <section class="agent-office-panel" aria-label="Estações dos agentes">
@@ -388,7 +388,7 @@ function renderAgents() {
       <aside class="agent-inspector" aria-live="polite" aria-label="Detalhes do agente selecionado">
         <div class="agent-inspector-top"><div><span class="inspector-eyebrow">Função selecionada</span><h2>${esc(selected[1])}</h2><p>${esc(selected[2])}</p></div><span class="agent-state-label ${statusClass}"><i class="agent-state-dot ${statusClass}"></i>${statusLabel}</span></div>
         <div class="agent-task-block"><span class="inspector-label">Atividade</span><h3>${taskForSelected?.state === 'working' ? 'Esta função está analisando os dados permitidos.' : taskForSelected?.state === 'queued' ? 'Esta função começa quando as anteriores terminarem.' : taskForSelected?.state === 'complete' ? 'A análise terminou. O resultado legível está abaixo, nos detalhes da execução.' : taskForSelected?.state === 'error' ? 'A execução encontrou um erro. Veja a mensagem nos detalhes abaixo.' : agentRuntime.connected ? 'Peça uma análise no botão acima ou converse pelo assistente no canto da tela.' : 'Inicie o executor local para habilitar as análises.'}</h3></div>
-        <dl class="agent-detail-list"><div><dt>Dados permitidos</dt><dd>${selectedAgentId === 'projetos' ? `${realProjectCount} projetos sem marcação de demonstração` : selectedAgentId === 'analise' ? `${realLeadCount} leads, ${realProjectCount} projetos e mensagens fornecidos` : `${realLeadCount} leads sem marcação de demonstração`}</dd></div><div><dt>Origem dos dados</dt><dd>${agentDataset ? `Arquivo local: ${esc(agentDataset.source)}` : 'Registros locais do app; importe o JSON exportado no painel Cloudflare para usar os dados online.'}</dd></div><div><dt>Limites</dt><dd>Somente leitura. A saída fica para sua revisão, sem gravação automática no CRM.</dd></div></dl>
+        <dl class="agent-detail-list"><div><dt>Dados desta execução</dt><dd>${selectedAgentId === 'projetos' ? `${selectedRun?.projectCount ?? realProjectCount} projetos analisados` : selectedAgentId === 'analise' ? `${selectedRun?.leadCount ?? realLeadCount} leads e ${selectedRun?.projectCount ?? realProjectCount} projetos analisados` : `${selectedRun?.leadCount ?? realLeadCount} leads analisados`}</dd></div><div><dt>Disponíveis agora</dt><dd>${realLeadCount} leads · ${realProjectCount} projetos${agentDataset ? ` · arquivo: ${esc(agentDataset.source)}` : ' · armazenamento deste navegador'}</dd></div><div><dt>Limites</dt><dd>Esta execução lê os dados informados e salva o resultado no histórico local. Confira a origem antes de iniciar outra análise.</dd></div></dl>
         <div class="agent-inspector-foot"><span class="agent-inspector-avatar" aria-hidden="true">AI</span><span><strong>Codex CLI · seu plano autenticado</strong><small>Uma execução por função, iniciada manualmente</small></span></div>
       </aside>
     </div>
