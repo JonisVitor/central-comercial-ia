@@ -1,0 +1,7 @@
+# Provenance: agent-office.png
+
+Generated with the OpenAI image generation tool for the Central Comercial IA agent-office demonstration.
+
+Prompt:
+
+> Create a premium isometric 3D mini office diorama as a transparent PNG asset for a web app, wide landscape 16:10 composition, viewed from elevated 3/4 isometric camera. This is a compact sophisticated small-business digital agency office, with five distinct workstation clusters on one coherent floating floor plan, subtle dark navy flooring, warm walnut desks, small orange accents matching #e97935, muted blue-green plants, warm desk lamps and monitors. Exactly five tiny stylized human AI-worker characters, friendly but professional, seated or standing at separate stations, visibly working at monitors or notes. Each workstation unmistakably distinct by props: magnifier/map notes for research; browser/computer inspection; funnel/data analysis board; message/chat drafting; laptop/web design board. Leave spaces between stations so UI can overlay clickable markers. Premium low-poly / polished 3D game diorama, clean shapes, soft directional shadows, crisp detail, restrained palette, no words, no letters, no labels, no numbers, no UI, no text, no extra figures, no photo realism. Transparent background outside the office floor footprint; keep all desks, people and props fully inside the floating floor boundary. Suitable as a central visual for an interactive dashboard, no cropped objects.

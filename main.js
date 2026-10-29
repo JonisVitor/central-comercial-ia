@@ -14,6 +14,20 @@ const PROJECT_STAGES = [
   ['entregue', 'Projeto entregue'], ['ativo', 'Hospedagem ativa']
 ];
 const DEMO_MARKER = 'demo';
+const AGENT_DEMO = [
+  { id: 'researcher', name: 'Pesquisador', role: 'Pesquisa de empresas', status: 'working', statusLabel: 'Trabalhando', task: 'Buscando pet shops em São Carlos', progress: 64, last: 'Comparou perfis fictícios no Maps', next: 'Registrar os links e enviar para verificação', position: ['18%', '28%'] },
+  { id: 'verifier', name: 'Verificador', role: 'Presença digital', status: 'working', statusLabel: 'Trabalhando', task: 'Conferindo site, Maps e Instagram da Loja Exemplo A', progress: 42, last: 'Encontrou um link social para revisar', next: 'Concluir conferência e anexar evidências', position: ['44%', '21%'] },
+  { id: 'qualifier', name: 'Qualificador', role: 'Análise da oportunidade', status: 'working', statusLabel: 'Trabalhando', task: 'Avaliando a Empresa Exemplo B', progress: 78, last: 'Organizou sinais de presença digital', next: 'Sugerir prioridade e explicar o motivo', position: ['76%', '30%'] },
+  { id: 'writer', name: 'Preparador', role: 'Rascunho de mensagem', status: 'approval', statusLabel: 'Aguardando sua aprovação', task: 'Mensagem pronta para a Loja Exemplo A', progress: 100, last: 'Rascunho criado para você revisar', next: 'Aguardar sua revisão antes de qualquer envio', position: ['31%', '67%'] },
+  { id: 'sites', name: 'Projetos e sites', role: 'Acompanhamento de entrega', status: 'error', statusLabel: 'Erro simulado', task: 'Atualização de etapa interrompida', progress: 36, last: 'Falha demonstrativa de conexão', next: 'Revisar a tarefa antes de tentar novamente', position: ['68%', '65%'] }
+];
+const AGENT_DEMO_EVENTS = [
+  { agentId: 'researcher', text: 'Pesquisador reuniu 3 empresas fictícias para conferência.' },
+  { agentId: 'verifier', text: 'Verificador encontrou um link social para revisar.' },
+  { agentId: 'qualifier', text: 'Qualificador está preparando uma sugestão de prioridade.' },
+  { agentId: 'writer', text: 'Preparador deixou um rascunho aguardando sua aprovação.' },
+  { agentId: 'sites', text: 'Projetos e sites encontrou um erro de demonstração e pausou a tarefa.' }
+];
 
 const el = (selector, root = document) => root.querySelector(selector);
 const all = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -58,6 +72,9 @@ let leadFilter = 'todos';
 let leadSearch = '';
 let remoteHydrated = false;
 let syncTimer;
+let selectedAgentId = 'researcher';
+let agentDemoEventIndex = 0;
+let agentDemoPaused = false;
 
 const isLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
 
@@ -169,6 +186,7 @@ function renderShell() {
           ${navItem('leads', '◎', 'Prospecção')}
           ${navItem('projects', '▱', 'Projetos')}
           ${navItem('messages', '◌', 'Conversas')}
+          ${navItem('agents', '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.2"/><path d="M3.8 19v-1.1a5.2 5.2 0 0 1 10.4 0V19zM15.2 14.3a4.1 4.1 0 0 1 5 4V19h-3.2"/></svg>', 'Agentes')}
         </nav></div>
         <div><div class="nav-label">Base</div><nav class="nav-list" aria-label="Configurações">
           ${navItem('services', '◇', 'Serviços')}
@@ -194,9 +212,10 @@ function renderPages() {
     <section class="page ${currentPage === 'leads' ? 'active' : ''}" data-page-view="leads">${renderLeads()}</section>
     <section class="page ${currentPage === 'projects' ? 'active' : ''}" data-page-view="projects">${renderProjects()}</section>
     <section class="page ${currentPage === 'messages' ? 'active' : ''}" data-page-view="messages">${renderMessages()}</section>
+    <section class="page ${currentPage === 'agents' ? 'active' : ''}" data-page-view="agents">${renderAgents()}</section>
     <section class="page ${currentPage === 'services' ? 'active' : ''}" data-page-view="services">${renderServices()}</section>
     <section class="page ${currentPage === 'settings' ? 'active' : ''}" data-page-view="settings">${renderSettings()}</section>`;
-  el('#breadcrumb-current').textContent = { overview: 'Visão geral', leads: 'Prospecção', projects: 'Projetos', messages: 'Conversas', services: 'Serviços', settings: 'Configurações' }[currentPage];
+  el('#breadcrumb-current').textContent = { overview: 'Visão geral', leads: 'Prospecção', projects: 'Projetos', messages: 'Conversas', agents: 'Agentes', services: 'Serviços', settings: 'Configurações' }[currentPage];
   bindPageEvents();
 }
 
@@ -245,6 +264,57 @@ function renderProjects() {
     <div class="notice">Os prazos são contados em dias corridos. O relógio atualiza automaticamente e sinaliza quando entra nas últimas 24 horas.</div>
     <div class="project-grid">${state.projects.length ? state.projects.map(renderProjectCard).join('') : emptyState('Nenhum projeto criado', 'Quando a venda for fechada, crie um projeto para acompanhar a entrega.')}</div>`;
 }
+
+function renderAgents() {
+  const selected = AGENT_DEMO.find((agent) => agent.id === selectedAgentId) || AGENT_DEMO[0];
+  const statusCounts = {
+    working: AGENT_DEMO.filter((agent) => agent.status === 'working').length,
+    approval: AGENT_DEMO.filter((agent) => agent.status === 'approval').length,
+    error: AGENT_DEMO.filter((agent) => agent.status === 'error').length
+  };
+  const liveEvent = AGENT_DEMO_EVENTS[agentDemoEventIndex % AGENT_DEMO_EVENTS.length];
+  return `<div class="agents-page">
+    <header class="agents-page-header">
+      <div><h1>Escritório dos agentes</h1><p class="lede">Veja as funções da equipe e o que cada uma está fazendo.</p></div>
+      <div class="agents-page-actions"><span class="simulation-badge"><span class="simulation-dot"></span>Demonstração simulada</span><button class="ghost-btn agent-demo-toggle" type="button" data-agent-demo-toggle aria-pressed="${agentDemoPaused}">${agentDemoPaused ? '▶ Retomar' : 'Ⅱ Pausar'}</button></div>
+    </header>
+    <p class="agent-demo-notice" role="note"><strong>Exemplo ilustrativo.</strong> Os agentes, empresas e tarefas abaixo são fictícios. Nenhum lead real está sendo pesquisado e nenhuma mensagem é enviada.</p>
+    <div class="agent-status-strip" aria-label="Estados simulados dos agentes">
+      <span class="agent-status-count"><i class="agent-state-dot working"></i><strong>${statusCounts.working}</strong> trabalhando</span>
+      <span class="agent-status-count"><i class="agent-state-dot approval"></i><strong>${statusCounts.approval}</strong> aguardando você</span>
+      <span class="agent-status-count"><i class="agent-state-dot error"></i><strong>${statusCounts.error}</strong> com erro</span>
+      <span class="agent-status-count agent-total-count"><strong>${AGENT_DEMO.length}</strong> funções no exemplo</span>
+    </div>
+    <div class="agents-workspace">
+      <section class="agent-office-panel" aria-label="Escritório isométrico dos agentes">
+        <div class="agent-office-heading"><div><h2>Equipe em atividade</h2><p>Selecione uma estação para ver a tarefa.</p></div><span class="office-presence ${agentDemoPaused ? 'paused' : ''}"><i></i> ${agentDemoPaused ? 'Demonstração pausada' : 'Cenário em movimento'}</span></div>
+        <div class="agent-office-stage">
+          <img class="agent-office-art" src="/agent-office.png" alt="Escritório isométrico ilustrativo com cinco agentes em postos de trabalho" />
+          ${AGENT_DEMO.map((agent) => `<button class="office-agent-pin ${agent.status} ${selected.id === agent.id ? 'selected' : ''}" type="button" data-agent-id="${agent.id}" style="--pin-x:${agent.position[0]};--pin-y:${agent.position[1]}" aria-label="${agent.name}, ${agent.statusLabel}. ${agent.task}" aria-pressed="${selected.id === agent.id}"><i class="agent-state-dot ${agent.status}"></i><span>${agent.name}</span></button>`).join('')}
+          <span class="office-scene-tag"><span class="scene-tag-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5zM4.5 7.8 12 12l7.5-4.2M12 12v8.5"/></svg></span>Central Comercial IA</span>
+        </div>
+        <div class="agent-office-caption"><span>Uma estação por função</span><span>Atividade e status apenas demonstrativos</span></div>
+      </section>
+      <aside class="agent-inspector" aria-live="polite" aria-label="Detalhes do agente selecionado">
+        ${renderAgentInspector(selected)}
+      </aside>
+    </div>
+    <section class="agent-activity-panel" aria-label="Atividade recente simulada">
+      <div class="agent-activity-heading"><div><h2>Atividade recente</h2><p>Exemplo de como as atualizações aparecerão.</p></div><span class="mono" id="agent-demo-event-time">${new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(new Date())}</span></div>
+      <div class="agent-live-event" role="status" aria-live="polite"><span class="agent-event-node ${liveEvent.agentId}"></span><strong>${esc(AGENT_DEMO.find((agent) => agent.id === liveEvent.agentId)?.name || 'Agente')}</strong><span id="agent-demo-event-text">${esc(liveEvent.text)}</span><span class="agent-event-demo-tag">simulado</span></div>
+      <div class="agent-process-line" aria-label="Fluxo demonstrativo"><span class="complete">Pesquisar empresas</span><b>→</b><span class="complete">Conferir presença digital</span><b>→</b><span class="current">Qualificar</span><b>→</b><span class="waiting">Revisar mensagem</span><b>→</b><span>Produzir e entregar site</span></div>
+    </section>
+  </div>`;
+}
+
+function renderAgentInspector(agent) {
+  const statusClass = agent.status === 'working' ? 'working' : agent.status === 'approval' ? 'approval' : 'error';
+  const progressText = agent.status === 'error' ? 'Pausado para revisão' : agent.status === 'approval' ? 'Pronto para você revisar' : 'Executando etapa de exemplo';
+  return `<div class="agent-inspector-top"><div><span class="inspector-eyebrow">Função selecionada</span><h2>${esc(agent.name)}</h2><p>${esc(agent.role)}</p></div><span class="agent-state-label ${statusClass}"><i class="agent-state-dot ${statusClass}"></i>${esc(agent.statusLabel)}</span></div>
+    <div class="agent-task-block"><span class="inspector-label">Tarefa atual · simulada</span><h3>${esc(agent.task)}</h3><div class="agent-progress-caption"><span>${progressText}</span><strong>${agent.progress}%</strong></div><div class="agent-progress-track"><span class="${statusClass}" style="width:${agent.progress}%"></span></div></div>
+    <dl class="agent-detail-list"><div><dt>Última atividade</dt><dd>${esc(agent.last)}</dd></div><div><dt>Próximo passo</dt><dd>${esc(agent.next)}</dd></div></dl>
+    <div class="agent-inspector-foot"><span class="agent-inspector-avatar" aria-hidden="true">${agent.id === 'researcher' ? 'P' : agent.id === 'verifier' ? 'V' : agent.id === 'qualifier' ? 'Q' : agent.id === 'writer' ? 'M' : 'S'}</span><span><strong>Perfil ilustrativo</strong><small>Sem conexão com Claude, Codex ou APIs</small></span></div>`;
+}
 function renderProjectCard(project) { const index = PROJECT_STAGES.findIndex(([id]) => id === project.stage); const count = countdown(project.dueDate); const lead = leadById(project.leadId); return `<article class="project-card"><div class="card-top"><div><div class="card-name">${esc(project.name)}</div><div class="card-location">${esc(project.service)}</div></div><span class="status-badge ${count.overdue ? 'red' : count.urgent ? 'yellow' : 'green'}" data-countdown-date="${esc(project.dueDate || '')}" data-countdown-tone="status">${count.text}</span></div><div class="stage-heading"><span>Progresso do projeto</span><strong>Etapa ${index + 1} de ${PROJECT_STAGES.length}</strong></div><div class="stage-map" aria-label="Etapas do projeto">${PROJECT_STAGES.map(([id, label], i) => `<div class="stage-item ${i < index ? 'done' : i === index ? 'current' : ''}"><span class="stage-marker">${i < index ? '✓' : i === index ? '●' : i + 1}</span><span class="stage-label">${label}</span></div>`).join('')}</div><div class="project-progress" aria-label="${Math.round(((index + 1) / PROJECT_STAGES.length) * 100)}% concluído"><span style="width:${Math.max(8, ((index + 1) / PROJECT_STAGES.length) * 100)}%"></span></div><div class="project-dates"><span>Início: ${formatDate(project.startDate)}</span><span>Limite: ${formatDate(project.dueDate)}</span></div><div class="card-footer"><span class="muted">${lead ? esc(lead.name) : 'Projeto cadastrado'}</span><button class="detail-link" data-project-id="${project.id}">Editar etapas →</button></div></article>`; }
 
 function renderMessages() {
@@ -280,6 +350,18 @@ function bindPageEvents() {
   all('[data-action="confirm-sent"]').forEach((button) => button.addEventListener('click', () => confirmSent(button.dataset.messageId)));
   all('[data-action="export"]').forEach((button) => button.addEventListener('click', exportData));
   all('[data-action="reset"]').forEach((button) => button.addEventListener('click', resetData));
+  all('[data-agent-id]').forEach((button) => button.addEventListener('click', () => { selectedAgentId = button.dataset.agentId; renderPages(); }));
+  el('[data-agent-demo-toggle]')?.addEventListener('click', (event) => {
+    agentDemoPaused = !agentDemoPaused;
+    const button = event.currentTarget;
+    button.setAttribute('aria-pressed', String(agentDemoPaused));
+    button.textContent = agentDemoPaused ? '▶ Retomar' : 'Ⅱ Pausar';
+    const presence = el('.office-presence');
+    if (presence) {
+      presence.classList.toggle('paused', agentDemoPaused);
+      presence.innerHTML = `<i></i> ${agentDemoPaused ? 'Demonstração pausada' : 'Cenário em movimento'}`;
+    }
+  });
 }
 function navigate(page) { currentPage = page; renderShell(); renderPages(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
 function toggleTheme() { state.settings.theme = state.settings.theme === 'light' ? 'dark' : 'light'; persist(); applyTheme(); renderShell(); renderPages(); toast(state.settings.theme === 'light' ? 'Modo claro ativado.' : 'Modo escuro ativado.'); }
@@ -499,3 +581,17 @@ hydrateRemoteState();
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 setInterval(refreshLiveCountdowns, 1000);
 setInterval(() => { if (document.visibilityState === 'visible') { if (currentPage === 'overview' || currentPage === 'projects' || currentPage === 'leads') renderPages(); } }, 60000);
+setInterval(() => {
+  if (currentPage !== 'agents' || document.visibilityState !== 'visible' || agentDemoPaused) return;
+  agentDemoEventIndex = (agentDemoEventIndex + 1) % AGENT_DEMO_EVENTS.length;
+  const event = AGENT_DEMO_EVENTS[agentDemoEventIndex];
+  const agent = AGENT_DEMO.find((item) => item.id === event.agentId);
+  const name = el('.agent-live-event strong');
+  const text = el('#agent-demo-event-text');
+  const time = el('#agent-demo-event-time');
+  const node = el('.agent-event-node');
+  if (name) name.textContent = agent?.name || 'Agente';
+  if (text) text.textContent = event.text;
+  if (time) time.textContent = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(new Date());
+  if (node) node.className = `agent-event-node ${event.agentId}`;
+}, 5200);
