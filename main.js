@@ -27,6 +27,9 @@ const formatDate = (value) => value ? new Intl.DateTimeFormat('pt-BR', { day: '2
 const formatLongDate = (value) => value ? new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }).format(new Date(value)) : '—';
 const toLocalDateTimeInput = (value) => { if (!value) return ''; const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
 const safeUrl = (value = '') => { const raw = String(value).trim(); if (!raw) return ''; try { const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`); return ['http:', 'https:'].includes(url.protocol) ? url.href : ''; } catch { return ''; } };
+const formatAgentResult = (value = '') => esc(value)
+  .replace(/\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+  .replace(/https:\/\/[^\s<>()]+/g, (raw) => `<a href="${raw}" target="_blank" rel="noopener noreferrer">${raw}</a>`);
 const mapsSearchUrl = (lead) => safeUrl(lead.mapsUrl) || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([lead.name, lead.city].filter(Boolean).join(' '))}`;
 const instagramSearchUrl = (lead) => `https://www.google.com/search?q=${encodeURIComponent(`${lead.name} ${lead.city} Instagram`)}`;
 const initials = (name = '') => name.split(' ').slice(0, 2).map((part) => part[0]).join('').toUpperCase();
@@ -72,7 +75,8 @@ const AGENT_ROLES = [
   ['qualificacao', 'Qualificação', 'Sugere prioridade sem alterar o fogo ou a etapa.', ['76%', '30%']],
   ['mensagens', 'Rascunhos de mensagem', 'Prepara texto para revisão; nunca envia.', ['31%', '67%']],
   ['acompanhamento', 'Acompanhamento comercial', 'Organiza próximos passos a partir do histórico.', ['55%', '50%']],
-  ['projetos', 'Gestão de projetos', 'Revisa prazos e etapas dos projetos cadastrados.', ['68%', '65%']]
+  ['projetos', 'Gestão de projetos', 'Revisa prazos e etapas dos projetos cadastrados.', ['68%', '65%']],
+  ['pesquisa', 'Pesquisador web', 'Pesquisa fontes públicas com o Codex e apresenta os links para revisão.', ['86%', '49%']]
 ];
 
 const isLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
@@ -81,11 +85,17 @@ function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
     if (saved?.leads && saved?.projects && saved?.messages) {
-      saved.settings = { demo: true, theme: 'dark', ...(saved.settings || {}) };
+      const realLeads = saved.leads.filter((lead) => lead.demo !== true && lead.demo !== DEMO_MARKER);
+      const realLeadIds = new Set(realLeads.map((lead) => lead.id));
+      saved.leads = realLeads;
+      saved.projects = saved.projects.filter((project) => project.demo !== true && project.demo !== DEMO_MARKER);
+      saved.messages = saved.messages.filter((message) => realLeadIds.has(message.leadId));
+      saved.settings = { demo: false, theme: 'dark', ...(saved.settings || {}), demo: false };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
       return saved;
     }
   } catch (error) { console.warn('Não foi possível ler o armazenamento local.', error); }
-  return seedState();
+  return { leads: [], projects: [], messages: [], settings: { demo: false, theme: 'dark' } };
 }
 function loadAgentDataset() {
   try {
@@ -219,14 +229,14 @@ function renderShell() {
 function renderAssistant() {
   const root = el('#assistant-root');
   if (!root) return;
-  const messages = assistantMessages.length ? assistantMessages.map((item) => `<div class="assistant-message ${item.role}"><span>${item.role === 'user' ? 'Você' : 'Assistente'}</span><p>${esc(item.text).replace(/\n/g, '<br>')}</p></div>`).join('') : `<div class="assistant-welcome"><h3>O que vamos fazer?</h3><p>Peça um resumo, uma recomendação ou uma análise dos registros que você importou.</p><button type="button" class="assistant-suggestion" data-assistant-suggestion="Analise meus leads e projetos com os agentes.">Analisar leads e projetos <span>↗</span></button></div>`;
+  const messages = assistantMessages.length ? assistantMessages.map((item) => `<div class="assistant-message ${item.role}"><span>${item.role === 'user' ? 'Você' : 'Assistente'}</span><p>${esc(item.text).replace(/\n/g, '<br>')}</p></div>`).join('') : `<div class="assistant-welcome"><h3>O que vamos fazer?</h3><p>Converse com o Codex, analise os registros importados ou peça uma pesquisa com fontes públicas.</p><button type="button" class="assistant-suggestion" data-assistant-suggestion="Analise meus leads e projetos com os agentes.">Analisar leads e projetos <span>↗</span></button><button type="button" class="assistant-suggestion" data-assistant-suggestion="Pesquise pet shops em São Carlos e traga fontes públicas para eu conferir.">Pesquisar na web com fontes <span>↗</span></button></div>`;
   root.innerHTML = `<div class="assistant-widget ${assistantOpen ? 'is-open' : ''}">
     ${assistantOpen ? `<section class="assistant-panel" aria-label="Chat com os agentes">
       <header class="assistant-header"><span class="assistant-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0-7.2 13l-.8 4 4-1A8.5 8.5 0 1 0 12 3.5Z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg></span><div><h2>Assistente da Central</h2><p>${agentRuntime.connected ? 'Codex local conectado' : 'Executor local desconectado'}</p></div><button class="assistant-close" type="button" data-assistant-close aria-label="Fechar conversa"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
-      <div class="assistant-scope-notice"><strong>Posso conversar e iniciar análises locais.</strong><span>Por enquanto não pesquiso na web, altero o CRM nem envio mensagens.</span>${agentRuntime.connected ? '' : '<span>Para conectar, inicie <code>npm run agents-runtime</code> no terminal deste computador.</span>'}</div>
+      <div class="assistant-scope-notice"><strong>Codex local ${agentRuntime.connected ? 'conectado' : 'desconectado'}.</strong><span>Pedidos de pesquisa usam a busca web do Codex e aparecem na estação Pesquisador web. Análises e pesquisas não alteram o CRM nem enviam mensagens.</span>${agentRuntime.connected ? '' : '<span>Para conectar, inicie <code>npm run agents-runtime</code> no terminal deste computador.</span>'}</div>
       <div class="assistant-messages" role="log" aria-live="polite" aria-relevant="additions text">${messages}${assistantBusy ? '<div class="assistant-typing" role="status"><i></i><i></i><i></i><span>Preparando resposta…</span></div>' : ''}</div>
       <form class="assistant-composer" data-assistant-form><label class="sr-only" for="assistant-input">Escreva uma instrução para os agentes</label><textarea id="assistant-input" name="message" rows="1" maxlength="2000" placeholder="Escreva sua mensagem…" ${assistantBusy || !agentRuntime.connected ? 'disabled' : ''} required></textarea><button type="submit" aria-label="Enviar mensagem" ${assistantBusy || !agentRuntime.connected ? 'disabled' : ''}><svg viewBox="0 0 24 24"><path d="M4 12 20 4l-5 16-3-7-8-1Z"/><path d="m12 13 8-9"/></svg></button></form>
-      <p class="assistant-foot">As mensagens usam seu plano Codex. Análises são locais e somente leitura.</p>
+      <p class="assistant-foot">Respostas e pesquisas usam seu plano Codex. Os agentes não alteram o CRM nem enviam mensagens.</p>
     </section>` : ''}
     <button class="assistant-fab" type="button" data-assistant-toggle aria-label="${assistantOpen ? 'Fechar assistente' : 'Abrir chat com agentes'}" aria-expanded="${assistantOpen}">${assistantOpen ? '<svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0-7.2 13l-.8 4 4-1A8.5 8.5 0 1 0 12 3.5Z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg>'}</button>
   </div>`;
@@ -259,6 +269,7 @@ async function sendAssistantMessage(rawText) {
     if (payload.run?.currentRun) {
       agentRuntime = payload.run;
       selectedRunId = payload.run.currentRun.id;
+      selectedAgentId = payload.run.currentRun.tasks?.[0]?.id || selectedAgentId;
       currentPage = 'agents';
       renderShell();
       renderPages();
@@ -355,7 +366,7 @@ function renderAgents() {
       <div><h1>Equipe de agentes</h1><p class="lede">Execuções reais do Codex CLI, sob demanda e com revisão humana.</p></div>
       <div class="agents-page-actions"><span class="simulation-badge ${agentRuntime.connected ? 'runtime-online' : ''}"><span class="simulation-dot"></span>${agentRuntime.connected ? 'Codex local conectado' : 'Executor local desconectado'}</span><button class="ghost-btn" type="button" data-agent-import>Importar JSON</button><input id="agent-data-file" type="file" accept=".json,application/json" hidden /><button class="primary-btn" type="button" data-agent-run ${!agentRuntime.connected || agentRuntime.running || (!realLeadCount && !realProjectCount) ? 'disabled' : ''}>${agentRuntime.running ? '⟳ Agentes trabalhando…' : '▶ Executar agentes'}</button></div>
     </header>
-    <p class="agent-demo-notice" role="note"><strong>Execução local e controlada.</strong> Só analisa leads/projetos sem marcação de demonstração. Não pesquisa Maps, não altera o CRM e não envia mensagens. Cada execução consome uso do seu plano Codex.</p>
+    <p class="agent-demo-notice" role="note"><strong>Execução local e controlada.</strong> Os seis perfis internos analisam os dados sem editar o CRM. O Pesquisador web é acionado pelo chat, usa busca web do Codex e apresenta fontes para você conferir. Nada é salvo no CRM nem enviado a empresas. Cada execução consome o uso do plano Codex.</p>
     <div class="agent-status-strip" aria-label="Estados atuais dos agentes">
       <span class="agent-status-count"><i class="agent-state-dot working"></i><strong>${counts.working}</strong> trabalhando</span>
       <span class="agent-status-count"><i class="agent-state-dot approval"></i><strong>${counts.approval}</strong> concluídos</span>
@@ -381,7 +392,7 @@ function renderAgents() {
     </div>
     <section class="agent-activity-panel" aria-label="Resultados das execuções">
       <div class="agent-activity-heading"><div><h2>Execuções e resultados</h2><p>${agentRuntime.running ? 'Os agentes estão trabalhando em sequência; esta tela atualiza automaticamente.' : 'Resumo da última execução e detalhes separados por função.'}</p></div><span class="mono">${selectedRun?.startedAt ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(selectedRun.startedAt)) : 'Sem execução'}</span></div>
-      ${selectedRun ? `<div class="agent-run-summary"><div class="agent-run-summary-top"><div><span class="summary-title">Resumo da execução</span><strong class="summary-state">${runStateLabel}</strong></div><span class="summary-completion ${errorCount ? 'has-errors' : ''}">${completedCount}/${selectedRun.tasks.length} funções concluídas</span></div><div class="agent-summary-metrics"><span><strong>${selectedRun.leadCount ?? 0}</strong> leads analisados</span><span><strong>${selectedRun.projectCount ?? 0}</strong> projetos analisados</span><span><strong>${errorCount}</strong> com erro</span><span>Origem: <strong>${esc(runSourceLabel)}</strong></span></div></div><div class="agent-details-heading"><div><h3>Detalhes por agente</h3><p>Escolha uma função para ler a análise completa.</p></div></div><div class="agent-results-list">${selectedRun.tasks.map((task) => `<button class="agent-result-row ${selectedAgentId === task.id ? 'selected' : ''}" data-agent-id="${task.id}" type="button" aria-pressed="${selectedAgentId === task.id}"><strong>${esc(task.name)}</strong><span>${task.state === 'working' ? 'Trabalhando…' : task.state === 'complete' ? 'Concluído' : task.state === 'error' ? 'Erro' : task.state === 'queued' ? 'Na fila' : 'Pendente'}</span></button>`).join('')}</div><article class="agent-selected-detail" aria-live="polite"><div class="agent-selected-detail-heading"><div><h4>${esc(selected[1])}</h4><span>${detailState}</span></div>${taskForSelected?.state === 'working' ? '<i class="agent-state-dot working" aria-label="Em execução"></i>' : ''}</div>${taskForSelected?.result ? `<pre class="agent-result">${esc(taskForSelected.result)}</pre>` : taskForSelected?.error ? `<pre class="agent-result agent-result-error">${esc(taskForSelected.error)}</pre>` : `<p class="agent-detail-empty">${taskForSelected?.state === 'queued' ? 'Este agente inicia depois que os anteriores concluírem.' : taskForSelected?.state === 'working' ? 'O resultado será exibido aqui quando a análise terminar.' : 'Ainda não há resultado para esta função.'}</p>`}</article>` : `<div class="agent-run-status">${agentRuntime.connected ? 'Executor conectado. Nenhuma execução iniciada.' : 'Executor local desconectado. Inicie-o no Windows para habilitar o botão.'}</div>`}
+      ${selectedRun ? `<div class="agent-run-summary"><div class="agent-run-summary-top"><div><span class="summary-title">Resumo da execução</span><strong class="summary-state">${runStateLabel}</strong></div><span class="summary-completion ${errorCount ? 'has-errors' : ''}">${completedCount}/${selectedRun.tasks.length} funções concluídas</span></div><div class="agent-summary-metrics"><span><strong>${selectedRun.leadCount ?? 0}</strong> leads analisados</span><span><strong>${selectedRun.projectCount ?? 0}</strong> projetos analisados</span><span><strong>${errorCount}</strong> com erro</span><span>Origem: <strong>${esc(runSourceLabel)}</strong></span></div></div><div class="agent-details-heading"><div><h3>Detalhes por agente</h3><p>Escolha uma função para ler a análise completa.</p></div></div><div class="agent-results-list">${selectedRun.tasks.map((task) => `<button class="agent-result-row ${selectedAgentId === task.id ? 'selected' : ''}" data-agent-id="${task.id}" type="button" aria-pressed="${selectedAgentId === task.id}"><strong>${esc(task.name)}</strong><span>${task.state === 'working' ? 'Trabalhando…' : task.state === 'complete' ? 'Concluído' : task.state === 'error' ? 'Erro' : task.state === 'queued' ? 'Na fila' : 'Pendente'}</span></button>`).join('')}</div><article class="agent-selected-detail" aria-live="polite"><div class="agent-selected-detail-heading"><div><h4>${esc(selected[1])}</h4><span>${detailState}</span></div>${taskForSelected?.state === 'working' ? '<i class="agent-state-dot working" aria-label="Em execução"></i>' : ''}</div>${taskForSelected?.result ? `<pre class="agent-result">${formatAgentResult(taskForSelected.result)}</pre>` : taskForSelected?.error ? `<pre class="agent-result agent-result-error">${esc(taskForSelected.error)}</pre>` : `<p class="agent-detail-empty">${taskForSelected?.state === 'queued' ? 'Este agente inicia depois que os anteriores concluírem.' : taskForSelected?.state === 'working' ? 'O resultado será exibido aqui quando a análise terminar.' : 'Ainda não há resultado para esta função.'}</p>`}</article>` : `<div class="agent-run-status">${agentRuntime.connected ? 'Executor conectado. Nenhuma execução iniciada.' : 'Executor local desconectado. Inicie-o no Windows para habilitar o botão.'}</div>`}
       <p class="agent-local-note">Este executor roda só neste PC. O site público e o celular continuam sem acesso a ele até configurarmos uma ponte autenticada.</p>
     </section>
   </div>`;

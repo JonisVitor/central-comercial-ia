@@ -22,8 +22,9 @@ Prospects are found and checked manually, including Google Maps and digital pres
 
 - The current web app is a Vite PWA hosted on Cloudflare Pages, with Pages Functions and D1 for shared online state.
 - Lead, message, and project workflows are editable from the app.
-- In local development, a separate Node runtime can run six Codex CLI profiles sequentially on demand. They analyze imported records in read-only mode; they do not search the web, edit the CRM, publish sites, or contact businesses.
-- The floating assistant is available only when the local Codex runtime is running. It can answer from supplied context and start an internal read-only analysis when explicitly asked. It cannot use external research tools.
+- In local development, a separate Node runtime can run six Codex CLI profiles sequentially to analyze records and a seventh web researcher on demand using Codex CLI's native web-search tool.
+- The floating assistant is available only when the local Codex runtime is running. It can answer from supplied context, start a read-only internal analysis, or perform a public web search with cited links when explicitly asked.
+- The web researcher is read-only: it does not edit CRM data, publish sites, or contact businesses. Codex CLI's web search consumes the authenticated Codex plan allowance and does not require an API key.
 - The public Cloudflare app and mobile clients cannot connect to the local agent runtime until a protected remote execution bridge is designed and configured.
 - Sending messages to prospects remains a manual, user-approved action.
 
@@ -37,7 +38,7 @@ Prospects are found and checked manually, including Google Maps and digital pres
 
 - The app currently stores and synchronizes leads, prepared messages, and projects.
 - The local panel reports actual Codex CLI execution states and outputs; office artwork is a visualization of those states, not the worker itself.
-- Research and collection of external landing-page references are not enabled in the runtime.
+- External research and landing-page reference collection are available only through the local Codex CLI runtime; they are not connected to the public Cloudflare app or mobile clients yet.
 
 ## Product Principles
 

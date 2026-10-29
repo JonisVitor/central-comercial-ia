@@ -330,6 +330,7 @@ h3 { margin-bottom: 4px; font-size: 15px; }
 .runtime-online .simulation-dot { animation: office-pulse 2s ease-in-out infinite; }
 .agents-page-actions .primary-btn:disabled { cursor: not-allowed; opacity: .55; }
 .agent-result { max-height: 340px; overflow: auto; margin: 0; padding: 13px; border: 1px solid var(--border); border-radius: 9px; color: var(--text-2); background: var(--surface-2); font: 11px/1.6 'DM Mono', monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-result a { color: var(--orange); text-decoration: underline; text-underline-offset: 2px; }
 .agent-result-error { color: var(--red); }
 .agent-run-status { margin: 0 17px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; color: var(--text-2); background: var(--surface-2); font-size: 11px; line-height: 1.5; }
 .agent-run-summary { display: grid; gap: 14px; margin: 0 17px; padding: 16px 17px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
