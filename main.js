@@ -357,10 +357,10 @@ function renderAgents() {
   const runSourceLabel = selectedRun?.source || 'Painel local';
   return `<div class="agents-page">
     <header class="agents-page-header">
-      <div><h1>Equipe de agentes</h1><p class="lede">Execuções reais do Codex CLI, sob demanda e com revisão humana.</p></div>
+      <div><h1>Equipe de agentes</h1><p class="lede">Execute os sete agentes internos nos seus leads e projetos. A pesquisa no Maps começa pelo chat e, ao terminar, aciona esses mesmos sete agentes.</p></div>
       <div class="agents-page-actions"><span class="simulation-badge ${agentRuntime.connected ? 'runtime-online' : ''}"><span class="simulation-dot"></span>${agentRuntime.connected ? 'Codex local conectado' : 'Executor local desconectado'}</span><button class="ghost-btn" type="button" data-agent-import>Importar JSON</button><input id="agent-data-file" type="file" accept=".json,application/json" hidden /><button class="primary-btn" type="button" data-agent-run ${!agentRuntime.connected || agentRuntime.running || (!realLeadCount && !realProjectCount) ? 'disabled' : ''}>${agentRuntime.running ? '⟳ Agentes trabalhando…' : '▶ Executar agentes'}</button></div>
     </header>
-      <p class="agent-demo-notice" role="note"><strong>Fluxo local do Codex.</strong> Peça um nicho e uma cidade pelo chat para pesquisar, verificar, qualificar e preparar mensagem e roteiro. Leads aprovados entram no painel aguardando sua revisão; o envio e a criação das LPs continuam com você. Cada execução consome o limite do plano Codex e a busca pública não garante cobertura completa do Maps. Importar JSON aqui adiciona os registros ao mesmo CRM usado em Prospecção.</p>
+      <p class="agent-demo-notice" role="note"><strong>Dois modos de execução.</strong> Este botão roda os sete agentes internos e não faz pesquisa no Maps. Para buscar empresas, peça no chat algo como “15 lanchonetes em São Carlos”; o Pesquisador web roda primeiro e depois os sete agentes. Leads aprovados entram no painel aguardando sua revisão. Mensagens e LPs continuam sob seu controle. Cada execução consome o limite do plano Codex. Importar JSON aqui atualiza o mesmo CRM usado em Prospecção.</p>
     <div class="agent-status-strip" aria-label="Estados atuais dos agentes">
       <span class="agent-status-count"><i class="agent-state-dot working"></i><strong>${counts.working}</strong> trabalhando</span>
       <span class="agent-status-count"><i class="agent-state-dot approval"></i><strong>${counts.approval}</strong> concluídos</span>
