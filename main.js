@@ -1,6 +1,8 @@
 import './styles.css';
 
 const STORAGE_KEY = 'central-comercial-ia:v1';
+const AGENT_DATA_STORAGE = 'central-comercial-ia:agent-input:v1';
+const ASSISTANT_CHAT_STORAGE = 'central-comercial-ia:assistant-chat:v1';
 
 const LEAD_STAGES = [
   ['novo', 'Novo lead'], ['verificar', 'Precisa verificar'], ['qualificado', 'Qualificado'],
@@ -14,21 +16,6 @@ const PROJECT_STAGES = [
   ['entregue', 'Projeto entregue'], ['ativo', 'Hospedagem ativa']
 ];
 const DEMO_MARKER = 'demo';
-const AGENT_DEMO = [
-  { id: 'researcher', name: 'Pesquisador', role: 'Pesquisa de empresas', status: 'working', statusLabel: 'Trabalhando', task: 'Buscando pet shops em São Carlos', progress: 64, last: 'Comparou perfis fictícios no Maps', next: 'Registrar os links e enviar para verificação', position: ['18%', '28%'] },
-  { id: 'verifier', name: 'Verificador', role: 'Presença digital', status: 'working', statusLabel: 'Trabalhando', task: 'Conferindo site, Maps e Instagram da Loja Exemplo A', progress: 42, last: 'Encontrou um link social para revisar', next: 'Concluir conferência e anexar evidências', position: ['44%', '21%'] },
-  { id: 'qualifier', name: 'Qualificador', role: 'Análise da oportunidade', status: 'working', statusLabel: 'Trabalhando', task: 'Avaliando a Empresa Exemplo B', progress: 78, last: 'Organizou sinais de presença digital', next: 'Sugerir prioridade e explicar o motivo', position: ['76%', '30%'] },
-  { id: 'writer', name: 'Preparador', role: 'Rascunho de mensagem', status: 'approval', statusLabel: 'Aguardando sua aprovação', task: 'Mensagem pronta para a Loja Exemplo A', progress: 100, last: 'Rascunho criado para você revisar', next: 'Aguardar sua revisão antes de qualquer envio', position: ['31%', '67%'] },
-  { id: 'sites', name: 'Projetos e sites', role: 'Acompanhamento de entrega', status: 'error', statusLabel: 'Erro simulado', task: 'Atualização de etapa interrompida', progress: 36, last: 'Falha demonstrativa de conexão', next: 'Revisar a tarefa antes de tentar novamente', position: ['68%', '65%'] }
-];
-const AGENT_DEMO_EVENTS = [
-  { agentId: 'researcher', text: 'Pesquisador reuniu 3 empresas fictícias para conferência.' },
-  { agentId: 'verifier', text: 'Verificador encontrou um link social para revisar.' },
-  { agentId: 'qualifier', text: 'Qualificador está preparando uma sugestão de prioridade.' },
-  { agentId: 'writer', text: 'Preparador deixou um rascunho aguardando sua aprovação.' },
-  { agentId: 'sites', text: 'Projetos e sites encontrou um erro de demonstração e pausou a tarefa.' }
-];
-
 const el = (selector, root = document) => root.querySelector(selector);
 const all = (selector, root = document) => [...root.querySelectorAll(selector)];
 const today = () => new Date();
@@ -65,6 +52,7 @@ function seedState() {
 }
 
 let state = loadState();
+let agentDataset = loadAgentDataset();
 let currentPage = 'overview';
 let currentLeadId = state.leads[0]?.id;
 let currentMessageId = state.messages[0]?.id;
@@ -72,9 +60,20 @@ let leadFilter = 'todos';
 let leadSearch = '';
 let remoteHydrated = false;
 let syncTimer;
-let selectedAgentId = 'researcher';
-let agentDemoEventIndex = 0;
-let agentDemoPaused = false;
+let selectedAgentId = 'triagem';
+let agentRuntime = { connected: false, running: false, history: [], roles: [] };
+let selectedRunId = '';
+let assistantOpen = false;
+let assistantBusy = false;
+let assistantMessages = loadAssistantMessages();
+const AGENT_ROLES = [
+  ['triagem', 'Triagem de leads', 'Organiza os registros reais e aponta dados faltantes.', ['18%', '28%']],
+  ['verificacao', 'Verificação', 'Confere consistência apenas com evidências salvas.', ['44%', '21%']],
+  ['qualificacao', 'Qualificação', 'Sugere prioridade sem alterar o fogo ou a etapa.', ['76%', '30%']],
+  ['mensagens', 'Rascunhos de mensagem', 'Prepara texto para revisão; nunca envia.', ['31%', '67%']],
+  ['acompanhamento', 'Acompanhamento comercial', 'Organiza próximos passos a partir do histórico.', ['55%', '50%']],
+  ['projetos', 'Gestão de projetos', 'Revisa prazos e etapas dos projetos cadastrados.', ['68%', '65%']]
+];
 
 const isLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
 
@@ -88,6 +87,19 @@ function loadState() {
   } catch (error) { console.warn('Não foi possível ler o armazenamento local.', error); }
   return seedState();
 }
+function loadAgentDataset() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(AGENT_DATA_STORAGE));
+    return Array.isArray(saved?.leads) && Array.isArray(saved?.projects) ? saved : null;
+  } catch { return null; }
+}
+function loadAssistantMessages() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(ASSISTANT_CHAT_STORAGE));
+    return Array.isArray(saved) ? saved.filter((item) => ['user', 'assistant'].includes(item.role) && typeof item.text === 'string').slice(-30) : [];
+  } catch { return []; }
+}
+function saveAssistantMessages() { localStorage.setItem(ASSISTANT_CHAT_STORAGE, JSON.stringify(assistantMessages.slice(-30))); }
 function persist() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   if (!isLocalHost && remoteHydrated) {
@@ -199,8 +211,62 @@ function renderShell() {
         <div id="pages"></div>
       </main>
     </div>
-    <div id="modal-root"></div><div class="toast" id="toast" role="status"></div>`;
+    <div id="assistant-root"></div><div id="modal-root"></div><div class="toast" id="toast" role="status"></div>`;
   bindShellEvents();
+  renderAssistant();
+}
+
+function renderAssistant() {
+  const root = el('#assistant-root');
+  if (!root) return;
+  const messages = assistantMessages.length ? assistantMessages.map((item) => `<div class="assistant-message ${item.role}"><span>${item.role === 'user' ? 'Você' : 'Assistente'}</span><p>${esc(item.text).replace(/\n/g, '<br>')}</p></div>`).join('') : `<div class="assistant-welcome"><h3>O que vamos fazer?</h3><p>Peça um resumo, uma recomendação ou uma análise dos registros que você importou.</p><button type="button" class="assistant-suggestion" data-assistant-suggestion="Analise meus leads e projetos com os agentes.">Analisar leads e projetos <span>↗</span></button></div>`;
+  root.innerHTML = `<div class="assistant-widget ${assistantOpen ? 'is-open' : ''}">
+    ${assistantOpen ? `<section class="assistant-panel" aria-label="Chat com os agentes">
+      <header class="assistant-header"><span class="assistant-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0-7.2 13l-.8 4 4-1A8.5 8.5 0 1 0 12 3.5Z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg></span><div><h2>Assistente da Central</h2><p>${agentRuntime.connected ? 'Codex local conectado' : 'Executor local desconectado'}</p></div><button class="assistant-close" type="button" data-assistant-close aria-label="Fechar conversa"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+      <div class="assistant-scope-notice"><strong>Posso conversar e iniciar análises locais.</strong><span>Por enquanto não pesquiso na web, altero o CRM nem envio mensagens.</span>${agentRuntime.connected ? '' : '<span>Para conectar, inicie <code>npm run agents-runtime</code> no terminal deste computador.</span>'}</div>
+      <div class="assistant-messages" role="log" aria-live="polite" aria-relevant="additions text">${messages}${assistantBusy ? '<div class="assistant-typing" role="status"><i></i><i></i><i></i><span>Preparando resposta…</span></div>' : ''}</div>
+      <form class="assistant-composer" data-assistant-form><label class="sr-only" for="assistant-input">Escreva uma instrução para os agentes</label><textarea id="assistant-input" name="message" rows="1" maxlength="2000" placeholder="Escreva sua mensagem…" ${assistantBusy || !agentRuntime.connected ? 'disabled' : ''} required></textarea><button type="submit" aria-label="Enviar mensagem" ${assistantBusy || !agentRuntime.connected ? 'disabled' : ''}><svg viewBox="0 0 24 24"><path d="M4 12 20 4l-5 16-3-7-8-1Z"/><path d="m12 13 8-9"/></svg></button></form>
+      <p class="assistant-foot">As mensagens usam seu plano Codex. Análises são locais e somente leitura.</p>
+    </section>` : ''}
+    <button class="assistant-fab" type="button" data-assistant-toggle aria-label="${assistantOpen ? 'Fechar assistente' : 'Abrir chat com agentes'}" aria-expanded="${assistantOpen}">${assistantOpen ? '<svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0-7.2 13l-.8 4 4-1A8.5 8.5 0 1 0 12 3.5Z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg>'}</button>
+  </div>`;
+  root.querySelector('[data-assistant-toggle]')?.addEventListener('click', () => { assistantOpen = !assistantOpen; renderAssistant(); if (assistantOpen) el('#assistant-input')?.focus(); });
+  root.querySelector('[data-assistant-close]')?.addEventListener('click', () => { assistantOpen = false; renderAssistant(); });
+  root.querySelector('[data-assistant-suggestion]')?.addEventListener('click', (event) => sendAssistantMessage(event.currentTarget.dataset.assistantSuggestion));
+  root.querySelector('[data-assistant-form]')?.addEventListener('submit', (event) => { event.preventDefault(); sendAssistantMessage(el('#assistant-input')?.value || ''); });
+  const log = root.querySelector('.assistant-messages');
+  if (log) log.scrollTop = log.scrollHeight;
+}
+
+async function sendAssistantMessage(rawText) {
+  const text = String(rawText || '').trim();
+  if (!text || assistantBusy) return;
+  assistantMessages.push({ role: 'user', text });
+  assistantBusy = true;
+  saveAssistantMessages();
+  renderAssistant();
+  const leads = agentDataset?.leads || state.leads.filter((lead) => lead.demo !== true && lead.demo !== 'demo');
+  const projects = agentDataset?.projects || state.projects.filter((project) => project.demo !== true && project.demo !== 'demo');
+  const messages = agentDataset?.messages || state.messages.filter((message) => leads.some((lead) => lead.id === message.leadId));
+  try {
+    const response = await fetch('/api/agent-runtime/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, history: assistantMessages.slice(-12), leads, projects, messages })
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Não foi possível responder agora.');
+    assistantMessages.push({ role: 'assistant', text: payload.reply });
+    if (payload.run?.currentRun) {
+      agentRuntime = payload.run;
+      selectedRunId = payload.run.currentRun.id;
+      currentPage = 'agents';
+      renderShell();
+      renderPages();
+    }
+  } catch (error) { assistantMessages.push({ role: 'assistant', text: error.message }); }
+  assistantBusy = false;
+  saveAssistantMessages();
+  renderAssistant();
 }
 
 function navItem(page, icon, label) { return `<button class="nav-item ${currentPage === page ? 'active' : ''}" data-page="${page}"><span class="nav-icon">${icon}</span><span>${label}</span></button>`; }
@@ -266,54 +332,59 @@ function renderProjects() {
 }
 
 function renderAgents() {
-  const selected = AGENT_DEMO.find((agent) => agent.id === selectedAgentId) || AGENT_DEMO[0];
-  const statusCounts = {
-    working: AGENT_DEMO.filter((agent) => agent.status === 'working').length,
-    approval: AGENT_DEMO.filter((agent) => agent.status === 'approval').length,
-    error: AGENT_DEMO.filter((agent) => agent.status === 'error').length
-  };
-  const liveEvent = AGENT_DEMO_EVENTS[agentDemoEventIndex % AGENT_DEMO_EVENTS.length];
+  const activeRun = agentRuntime.currentRun;
+  const run = activeRun || agentRuntime.history?.find((item) => item.id === selectedRunId) || agentRuntime.history?.[0];
+  if (activeRun) selectedRunId = activeRun.id;
+  const selected = AGENT_ROLES.find(([id]) => id === selectedAgentId) || AGENT_ROLES[0];
+  const tasks = run?.tasks || [];
+  const counts = { working: tasks.filter((task) => task.state === 'working').length, approval: tasks.filter((task) => task.state === 'complete').length, error: tasks.filter((task) => task.state === 'error').length };
+  const realLeadCount = agentDataset ? agentDataset.leads.length : state.leads.filter((lead) => lead.demo !== true && lead.demo !== 'demo').length;
+  const realProjectCount = agentDataset ? agentDataset.projects.length : state.projects.filter((project) => project.demo !== true && project.demo !== 'demo').length;
+  const taskForSelected = tasks.find((task) => task.id === selectedAgentId);
+  const statusLabel = taskForSelected?.state === 'working' ? 'Executando' : taskForSelected?.state === 'complete' ? 'Concluído' : taskForSelected?.state === 'error' ? 'Erro' : taskForSelected?.state === 'queued' ? 'Na fila' : 'Aguardando execução';
+  const statusClass = taskForSelected?.state === 'working' ? 'working' : taskForSelected?.state === 'complete' ? 'approval' : taskForSelected?.state === 'error' ? 'error' : 'idle';
+  const history = agentRuntime.history || [];
+  const selectedRun = activeRun || history.find((item) => item.id === selectedRunId) || run;
+  const completedCount = selectedRun?.tasks?.filter((task) => task.state === 'complete').length || 0;
+  const errorCount = selectedRun?.tasks?.filter((task) => task.state === 'error').length || 0;
+  const detailState = taskForSelected?.state === 'working' ? 'Trabalhando agora' : taskForSelected?.state === 'complete' ? 'Concluído' : taskForSelected?.state === 'error' ? 'Precisa de atenção' : taskForSelected?.state === 'queued' ? 'Aguardando sua vez' : 'Ainda sem execução';
+  const runStateLabel = selectedRun?.state === 'complete' ? 'Execução concluída' : selectedRun?.state === 'partial' ? 'Execução com erros' : selectedRun?.state === 'running' ? 'Execução em andamento' : 'Nenhuma execução';
+  const runSourceLabel = selectedRun?.source || 'Painel local';
   return `<div class="agents-page">
     <header class="agents-page-header">
-      <div><h1>Escritório dos agentes</h1><p class="lede">Veja as funções da equipe e o que cada uma está fazendo.</p></div>
-      <div class="agents-page-actions"><span class="simulation-badge"><span class="simulation-dot"></span>Demonstração simulada</span><button class="ghost-btn agent-demo-toggle" type="button" data-agent-demo-toggle aria-pressed="${agentDemoPaused}">${agentDemoPaused ? '▶ Retomar' : 'Ⅱ Pausar'}</button></div>
+      <div><h1>Equipe de agentes</h1><p class="lede">Execuções reais do Codex CLI, sob demanda e com revisão humana.</p></div>
+      <div class="agents-page-actions"><span class="simulation-badge ${agentRuntime.connected ? 'runtime-online' : ''}"><span class="simulation-dot"></span>${agentRuntime.connected ? 'Codex local conectado' : 'Executor local desconectado'}</span><button class="ghost-btn" type="button" data-agent-import>Importar JSON</button><input id="agent-data-file" type="file" accept=".json,application/json" hidden /><button class="primary-btn" type="button" data-agent-run ${!agentRuntime.connected || agentRuntime.running || (!realLeadCount && !realProjectCount) ? 'disabled' : ''}>${agentRuntime.running ? '⟳ Agentes trabalhando…' : '▶ Executar agentes'}</button></div>
     </header>
-    <p class="agent-demo-notice" role="note"><strong>Exemplo ilustrativo.</strong> Os agentes, empresas e tarefas abaixo são fictícios. Nenhum lead real está sendo pesquisado e nenhuma mensagem é enviada.</p>
-    <div class="agent-status-strip" aria-label="Estados simulados dos agentes">
-      <span class="agent-status-count"><i class="agent-state-dot working"></i><strong>${statusCounts.working}</strong> trabalhando</span>
-      <span class="agent-status-count"><i class="agent-state-dot approval"></i><strong>${statusCounts.approval}</strong> aguardando você</span>
-      <span class="agent-status-count"><i class="agent-state-dot error"></i><strong>${statusCounts.error}</strong> com erro</span>
-      <span class="agent-status-count agent-total-count"><strong>${AGENT_DEMO.length}</strong> funções no exemplo</span>
+    <p class="agent-demo-notice" role="note"><strong>Execução local e controlada.</strong> Só analisa leads/projetos sem marcação de demonstração. Não pesquisa Maps, não altera o CRM e não envia mensagens. Cada execução consome uso do seu plano Codex.</p>
+    <div class="agent-status-strip" aria-label="Estados atuais dos agentes">
+      <span class="agent-status-count"><i class="agent-state-dot working"></i><strong>${counts.working}</strong> trabalhando</span>
+      <span class="agent-status-count"><i class="agent-state-dot approval"></i><strong>${counts.approval}</strong> concluídos</span>
+      <span class="agent-status-count"><i class="agent-state-dot error"></i><strong>${counts.error}</strong> com erro</span>
+      <span class="agent-status-count agent-total-count"><strong>${realLeadCount}</strong> leads disponíveis · <strong>${realProjectCount}</strong> projetos ${agentDataset ? 'no JSON local' : 'neste navegador'}</span>
     </div>
     <div class="agents-workspace">
-      <section class="agent-office-panel" aria-label="Escritório isométrico dos agentes">
-        <div class="agent-office-heading"><div><h2>Equipe em atividade</h2><p>Selecione uma estação para ver a tarefa.</p></div><span class="office-presence ${agentDemoPaused ? 'paused' : ''}"><i></i> ${agentDemoPaused ? 'Demonstração pausada' : 'Cenário em movimento'}</span></div>
+      <section class="agent-office-panel" aria-label="Estações dos agentes">
+        <div class="agent-office-heading"><div><h2>Estações de trabalho</h2><p>Selecione uma função para ver o resultado.</p></div><span class="office-presence ${agentRuntime.connected ? '' : 'paused'}"><i></i> ${agentRuntime.connected ? 'Executor pronto' : 'Inicie o executor no computador'}</span></div>
         <div class="agent-office-stage">
-          <img class="agent-office-art" src="/agent-office.png" alt="Escritório isométrico ilustrativo com cinco agentes em postos de trabalho" />
-          ${AGENT_DEMO.map((agent) => `<button class="office-agent-pin ${agent.status} ${selected.id === agent.id ? 'selected' : ''}" type="button" data-agent-id="${agent.id}" style="--pin-x:${agent.position[0]};--pin-y:${agent.position[1]}" aria-label="${agent.name}, ${agent.statusLabel}. ${agent.task}" aria-pressed="${selected.id === agent.id}"><i class="agent-state-dot ${agent.status}"></i><span>${agent.name}</span></button>`).join('')}
+          <img class="agent-office-art" src="/agent-office.png" alt="Ilustração do escritório com estações das funções de agentes" />
+          ${AGENT_ROLES.map(([id, name, role, position]) => { const task = tasks.find((item) => item.id === id); const pinState = task?.state === 'working' ? 'working' : task?.state === 'error' ? 'error' : task?.state === 'complete' ? 'approval' : ''; return `<button class="office-agent-pin ${pinState} ${selectedAgentId === id ? 'selected' : ''}" type="button" data-agent-id="${id}" style="--pin-x:${position[0]};--pin-y:${position[1]}" aria-label="${name}. ${role}" aria-pressed="${selectedAgentId === id}"><i class="agent-state-dot ${pinState || 'idle'}"></i><span>${name}</span></button>`; }).join('')}
           <span class="office-scene-tag"><span class="scene-tag-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5zM4.5 7.8 12 12l7.5-4.2M12 12v8.5"/></svg></span>Central Comercial IA</span>
         </div>
-        <div class="agent-office-caption"><span>Uma estação por função</span><span>Atividade e status apenas demonstrativos</span></div>
+        <div class="agent-office-caption"><span>Seis funções independentes · Codex CLI</span><span>O escritório é uma visualização; o trabalho é executado no computador.</span></div>
       </section>
       <aside class="agent-inspector" aria-live="polite" aria-label="Detalhes do agente selecionado">
-        ${renderAgentInspector(selected)}
+        <div class="agent-inspector-top"><div><span class="inspector-eyebrow">Função selecionada</span><h2>${esc(selected[1])}</h2><p>${esc(selected[2])}</p></div><span class="agent-state-label ${statusClass}"><i class="agent-state-dot ${statusClass}"></i>${statusLabel}</span></div>
+        <div class="agent-task-block"><span class="inspector-label">Atividade</span><h3>${taskForSelected?.state === 'working' ? 'Esta função está analisando os dados permitidos.' : taskForSelected?.state === 'queued' ? 'Esta função começa quando as anteriores terminarem.' : taskForSelected?.state === 'complete' ? 'A análise terminou. O resultado legível está abaixo, nos detalhes da execução.' : taskForSelected?.state === 'error' ? 'A execução encontrou um erro. Veja a mensagem nos detalhes abaixo.' : agentRuntime.connected ? 'Peça uma análise no botão acima ou converse pelo assistente no canto da tela.' : 'Inicie o executor local para habilitar as análises.'}</h3></div>
+        <dl class="agent-detail-list"><div><dt>Dados permitidos</dt><dd>${selectedAgentId === 'projetos' ? `${realProjectCount} projetos sem marcação de demonstração` : `${realLeadCount} leads sem marcação de demonstração`}</dd></div><div><dt>Origem dos dados</dt><dd>${agentDataset ? `Arquivo local: ${esc(agentDataset.source)}` : 'Registros locais do app; importe o JSON exportado no painel Cloudflare para usar os dados online.'}</dd></div><div><dt>Limites</dt><dd>Somente leitura. A saída fica para sua revisão, sem gravação automática no CRM.</dd></div></dl>
+        <div class="agent-inspector-foot"><span class="agent-inspector-avatar" aria-hidden="true">AI</span><span><strong>Codex CLI · seu plano autenticado</strong><small>Uma execução por função, iniciada manualmente</small></span></div>
       </aside>
     </div>
-    <section class="agent-activity-panel" aria-label="Atividade recente simulada">
-      <div class="agent-activity-heading"><div><h2>Atividade recente</h2><p>Exemplo de como as atualizações aparecerão.</p></div><span class="mono" id="agent-demo-event-time">${new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(new Date())}</span></div>
-      <div class="agent-live-event" role="status" aria-live="polite"><span class="agent-event-node ${liveEvent.agentId}"></span><strong>${esc(AGENT_DEMO.find((agent) => agent.id === liveEvent.agentId)?.name || 'Agente')}</strong><span id="agent-demo-event-text">${esc(liveEvent.text)}</span><span class="agent-event-demo-tag">simulado</span></div>
-      <div class="agent-process-line" aria-label="Fluxo demonstrativo"><span class="complete">Pesquisar empresas</span><b>→</b><span class="complete">Conferir presença digital</span><b>→</b><span class="current">Qualificar</span><b>→</b><span class="waiting">Revisar mensagem</span><b>→</b><span>Produzir e entregar site</span></div>
+    <section class="agent-activity-panel" aria-label="Resultados das execuções">
+      <div class="agent-activity-heading"><div><h2>Execuções e resultados</h2><p>${agentRuntime.running ? 'Os agentes estão trabalhando em sequência; esta tela atualiza automaticamente.' : 'Resumo da última execução e detalhes separados por função.'}</p></div><span class="mono">${selectedRun?.startedAt ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(selectedRun.startedAt)) : 'Sem execução'}</span></div>
+      ${selectedRun ? `<div class="agent-run-summary"><div class="agent-run-summary-top"><div><span class="summary-title">Resumo da execução</span><strong class="summary-state">${runStateLabel}</strong></div><span class="summary-completion ${errorCount ? 'has-errors' : ''}">${completedCount}/${selectedRun.tasks.length} funções concluídas</span></div><div class="agent-summary-metrics"><span><strong>${selectedRun.leadCount ?? 0}</strong> leads analisados</span><span><strong>${selectedRun.projectCount ?? 0}</strong> projetos analisados</span><span><strong>${errorCount}</strong> com erro</span><span>Origem: <strong>${esc(runSourceLabel)}</strong></span></div></div><div class="agent-details-heading"><div><h3>Detalhes por agente</h3><p>Escolha uma função para ler a análise completa.</p></div></div><div class="agent-results-list">${selectedRun.tasks.map((task) => `<button class="agent-result-row ${selectedAgentId === task.id ? 'selected' : ''}" data-agent-id="${task.id}" type="button" aria-pressed="${selectedAgentId === task.id}"><strong>${esc(task.name)}</strong><span>${task.state === 'working' ? 'Trabalhando…' : task.state === 'complete' ? 'Concluído' : task.state === 'error' ? 'Erro' : task.state === 'queued' ? 'Na fila' : 'Pendente'}</span></button>`).join('')}</div><article class="agent-selected-detail" aria-live="polite"><div class="agent-selected-detail-heading"><div><h4>${esc(selected[1])}</h4><span>${detailState}</span></div>${taskForSelected?.state === 'working' ? '<i class="agent-state-dot working" aria-label="Em execução"></i>' : ''}</div>${taskForSelected?.result ? `<pre class="agent-result">${esc(taskForSelected.result)}</pre>` : taskForSelected?.error ? `<pre class="agent-result agent-result-error">${esc(taskForSelected.error)}</pre>` : `<p class="agent-detail-empty">${taskForSelected?.state === 'queued' ? 'Este agente inicia depois que os anteriores concluírem.' : taskForSelected?.state === 'working' ? 'O resultado será exibido aqui quando a análise terminar.' : 'Ainda não há resultado para esta função.'}</p>`}</article>` : `<div class="agent-run-status">${agentRuntime.connected ? 'Executor conectado. Nenhuma execução iniciada.' : 'Executor local desconectado. Inicie-o no Windows para habilitar o botão.'}</div>`}
+      <p class="agent-local-note">Este executor roda só neste PC. O site público e o celular continuam sem acesso a ele até configurarmos uma ponte autenticada.</p>
     </section>
   </div>`;
-}
-
-function renderAgentInspector(agent) {
-  const statusClass = agent.status === 'working' ? 'working' : agent.status === 'approval' ? 'approval' : 'error';
-  const progressText = agent.status === 'error' ? 'Pausado para revisão' : agent.status === 'approval' ? 'Pronto para você revisar' : 'Executando etapa de exemplo';
-  return `<div class="agent-inspector-top"><div><span class="inspector-eyebrow">Função selecionada</span><h2>${esc(agent.name)}</h2><p>${esc(agent.role)}</p></div><span class="agent-state-label ${statusClass}"><i class="agent-state-dot ${statusClass}"></i>${esc(agent.statusLabel)}</span></div>
-    <div class="agent-task-block"><span class="inspector-label">Tarefa atual · simulada</span><h3>${esc(agent.task)}</h3><div class="agent-progress-caption"><span>${progressText}</span><strong>${agent.progress}%</strong></div><div class="agent-progress-track"><span class="${statusClass}" style="width:${agent.progress}%"></span></div></div>
-    <dl class="agent-detail-list"><div><dt>Última atividade</dt><dd>${esc(agent.last)}</dd></div><div><dt>Próximo passo</dt><dd>${esc(agent.next)}</dd></div></dl>
-    <div class="agent-inspector-foot"><span class="agent-inspector-avatar" aria-hidden="true">${agent.id === 'researcher' ? 'P' : agent.id === 'verifier' ? 'V' : agent.id === 'qualifier' ? 'Q' : agent.id === 'writer' ? 'M' : 'S'}</span><span><strong>Perfil ilustrativo</strong><small>Sem conexão com Claude, Codex ou APIs</small></span></div>`;
 }
 function renderProjectCard(project) { const index = PROJECT_STAGES.findIndex(([id]) => id === project.stage); const count = countdown(project.dueDate); const lead = leadById(project.leadId); return `<article class="project-card"><div class="card-top"><div><div class="card-name">${esc(project.name)}</div><div class="card-location">${esc(project.service)}</div></div><span class="status-badge ${count.overdue ? 'red' : count.urgent ? 'yellow' : 'green'}" data-countdown-date="${esc(project.dueDate || '')}" data-countdown-tone="status">${count.text}</span></div><div class="stage-heading"><span>Progresso do projeto</span><strong>Etapa ${index + 1} de ${PROJECT_STAGES.length}</strong></div><div class="stage-map" aria-label="Etapas do projeto">${PROJECT_STAGES.map(([id, label], i) => `<div class="stage-item ${i < index ? 'done' : i === index ? 'current' : ''}"><span class="stage-marker">${i < index ? '✓' : i === index ? '●' : i + 1}</span><span class="stage-label">${label}</span></div>`).join('')}</div><div class="project-progress" aria-label="${Math.round(((index + 1) / PROJECT_STAGES.length) * 100)}% concluído"><span style="width:${Math.max(8, ((index + 1) / PROJECT_STAGES.length) * 100)}%"></span></div><div class="project-dates"><span>Início: ${formatDate(project.startDate)}</span><span>Limite: ${formatDate(project.dueDate)}</span></div><div class="card-footer"><span class="muted">${lead ? esc(lead.name) : 'Projeto cadastrado'}</span><button class="detail-link" data-project-id="${project.id}">Editar etapas →</button></div></article>`; }
 
@@ -351,17 +422,64 @@ function bindPageEvents() {
   all('[data-action="export"]').forEach((button) => button.addEventListener('click', exportData));
   all('[data-action="reset"]').forEach((button) => button.addEventListener('click', resetData));
   all('[data-agent-id]').forEach((button) => button.addEventListener('click', () => { selectedAgentId = button.dataset.agentId; renderPages(); }));
-  el('[data-agent-demo-toggle]')?.addEventListener('click', (event) => {
-    agentDemoPaused = !agentDemoPaused;
-    const button = event.currentTarget;
-    button.setAttribute('aria-pressed', String(agentDemoPaused));
-    button.textContent = agentDemoPaused ? '▶ Retomar' : 'Ⅱ Pausar';
-    const presence = el('.office-presence');
-    if (presence) {
-      presence.classList.toggle('paused', agentDemoPaused);
-      presence.innerHTML = `<i></i> ${agentDemoPaused ? 'Demonstração pausada' : 'Cenário em movimento'}`;
-    }
-  });
+  el('[data-agent-run]')?.addEventListener('click', runAgents);
+  el('[data-agent-import]')?.addEventListener('click', () => el('#agent-data-file')?.click());
+  el('#agent-data-file')?.addEventListener('change', importAgentDataset);
+}
+async function refreshAgentRuntime(shouldRender = true) {
+  const wasConnected = agentRuntime.connected;
+  try {
+    const response = await fetch('/api/agent-runtime/health', { cache: 'no-store' });
+    if (!response.ok) throw new Error('Executor local indisponível.');
+    agentRuntime = await response.json();
+    if (assistantOpen && wasConnected !== agentRuntime.connected) renderAssistant();
+    if (shouldRender && currentPage === 'agents') renderPages();
+  } catch {
+    agentRuntime = { ...agentRuntime, connected: false };
+    if (assistantOpen && wasConnected) renderAssistant();
+    if (shouldRender && currentPage === 'agents') renderPages();
+  }
+}
+async function runAgents() {
+  const button = el('[data-agent-run]');
+  if (!button || agentRuntime.running) return;
+  const leads = agentDataset?.leads || state.leads.filter((lead) => lead.demo !== true && lead.demo !== 'demo');
+  const projects = agentDataset?.projects || state.projects.filter((project) => project.demo !== true && project.demo !== 'demo');
+  const messages = agentDataset?.messages || state.messages.filter((message) => leads.some((lead) => lead.id === message.leadId));
+  if (!leads.length && !projects.length) { toast('Não há leads ou projetos reais. Importe/cadastre dados reais antes de executar.'); return; }
+  button.disabled = true;
+  button.textContent = '⟳ Iniciando…';
+  try {
+    const response = await fetch('/api/agent-runtime/run', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: agentDataset?.source || 'Painel local', leads, projects, messages })
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Não foi possível iniciar os agentes.');
+    agentRuntime = payload;
+    selectedRunId = payload.currentRun?.id || '';
+    toast('Seis processos do Codex CLI foram iniciados. Acompanhe os resultados nesta tela.');
+  } catch (error) { toast(error.message); }
+  await refreshAgentRuntime();
+}
+async function importAgentDataset(event) {
+  const input = event.currentTarget;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  if (file.size > 2_000_000) { toast('O JSON ultrapassa 2 MB.'); return; }
+  try {
+    const imported = JSON.parse(await file.text());
+    if (!Array.isArray(imported.leads) || !Array.isArray(imported.projects)) throw new Error('Selecione o JSON exportado pela Central Comercial.');
+    const leads = imported.leads.filter((lead) => lead && lead.demo !== true && lead.demo !== 'demo');
+    const projects = imported.projects.filter((project) => project && project.demo !== true && project.demo !== 'demo');
+    if (leads.length > 30 || projects.length > 15) throw new Error('O lote deve ter até 30 leads e 15 projetos.');
+    if (!leads.length && !projects.length) throw new Error('Esse arquivo não contém leads ou projetos reais.');
+    agentDataset = { source: file.name, importedAt: new Date().toISOString(), leads, projects, messages: Array.isArray(imported.messages) ? imported.messages : [] };
+    localStorage.setItem(AGENT_DATA_STORAGE, JSON.stringify(agentDataset));
+    renderPages();
+    toast(`${leads.length} leads e ${projects.length} projetos prontos para análise. O CRM online não foi alterado.`);
+  } catch (error) { toast(error.message || 'Não foi possível ler esse JSON.'); }
 }
 function navigate(page) { currentPage = page; renderShell(); renderPages(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
 function toggleTheme() { state.settings.theme = state.settings.theme === 'light' ? 'dark' : 'light'; persist(); applyTheme(); renderShell(); renderPages(); toast(state.settings.theme === 'light' ? 'Modo claro ativado.' : 'Modo escuro ativado.'); }
@@ -581,17 +699,5 @@ hydrateRemoteState();
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 setInterval(refreshLiveCountdowns, 1000);
 setInterval(() => { if (document.visibilityState === 'visible') { if (currentPage === 'overview' || currentPage === 'projects' || currentPage === 'leads') renderPages(); } }, 60000);
-setInterval(() => {
-  if (currentPage !== 'agents' || document.visibilityState !== 'visible' || agentDemoPaused) return;
-  agentDemoEventIndex = (agentDemoEventIndex + 1) % AGENT_DEMO_EVENTS.length;
-  const event = AGENT_DEMO_EVENTS[agentDemoEventIndex];
-  const agent = AGENT_DEMO.find((item) => item.id === event.agentId);
-  const name = el('.agent-live-event strong');
-  const text = el('#agent-demo-event-text');
-  const time = el('#agent-demo-event-time');
-  const node = el('.agent-event-node');
-  if (name) name.textContent = agent?.name || 'Agente';
-  if (text) text.textContent = event.text;
-  if (time) time.textContent = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(new Date());
-  if (node) node.className = `agent-event-node ${event.agentId}`;
-}, 5200);
+setInterval(() => { if (currentPage === 'agents' && document.visibilityState === 'visible') refreshAgentRuntime(); }, 2500);
+refreshAgentRuntime(false);
