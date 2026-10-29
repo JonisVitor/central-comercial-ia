@@ -69,6 +69,7 @@ let selectedRunId = '';
 let assistantOpen = false;
 let assistantBusy = false;
 let assistantMessages = loadAssistantMessages();
+const researchSelection = new Set();
 const AGENT_ROLES = [
   ['triagem', 'Triagem de leads', 'Organiza os registros reais e aponta dados faltantes.', ['18%', '28%']],
   ['verificacao', 'Verificação', 'Confere consistência apenas com evidências salvas.', ['44%', '21%']],
@@ -237,7 +238,7 @@ function renderAssistant() {
       <div class="assistant-scope-notice"><strong>Codex local ${agentRuntime.connected ? 'conectado' : 'desconectado'}.</strong><span>Pedidos de pesquisa usam a busca web do Codex e aparecem na estação Pesquisador web. Análises e pesquisas não alteram o CRM nem enviam mensagens.</span>${agentRuntime.connected ? '' : '<span>Para conectar, inicie <code>npm run agents-runtime</code> no terminal deste computador.</span>'}</div>
       <div class="assistant-messages" role="log" aria-live="polite" aria-relevant="additions text">${messages}${assistantBusy ? '<div class="assistant-typing" role="status"><i></i><i></i><i></i><span>Preparando resposta…</span></div>' : ''}</div>
       <form class="assistant-composer" data-assistant-form><label class="sr-only" for="assistant-input">Escreva uma instrução para os agentes</label><textarea id="assistant-input" name="message" rows="1" maxlength="2000" placeholder="Escreva sua mensagem…" ${assistantBusy || !agentRuntime.connected ? 'disabled' : ''} required></textarea><button type="submit" aria-label="Enviar mensagem" ${assistantBusy || !agentRuntime.connected ? 'disabled' : ''}><svg viewBox="0 0 24 24"><path d="M4 12 20 4l-5 16-3-7-8-1Z"/><path d="m12 13 8-9"/></svg></button></form>
-      <p class="assistant-foot">Respostas e pesquisas usam seu plano Codex. Os agentes não alteram o CRM nem enviam mensagens.</p>
+      <p class="assistant-foot">Pesquisas usam seu plano Codex. Leads só entram após sua confirmação; o painel não envia mensagens.</p>
     </section>` : ''}
     <button class="assistant-fab" type="button" data-assistant-toggle aria-label="${assistantOpen ? 'Fechar assistente' : 'Abrir chat com agentes'}" aria-expanded="${assistantOpen}">${assistantOpen ? '<svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0-7.2 13l-.8 4 4-1A8.5 8.5 0 1 0 12 3.5Z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg>'}</button>
   </div>`;
@@ -367,7 +368,7 @@ function renderAgents() {
       <div><h1>Equipe de agentes</h1><p class="lede">Execuções reais do Codex CLI, sob demanda e com revisão humana.</p></div>
       <div class="agents-page-actions"><span class="simulation-badge ${agentRuntime.connected ? 'runtime-online' : ''}"><span class="simulation-dot"></span>${agentRuntime.connected ? 'Codex local conectado' : 'Executor local desconectado'}</span><button class="ghost-btn" type="button" data-agent-import>Importar JSON</button><input id="agent-data-file" type="file" accept=".json,application/json" hidden /><button class="primary-btn" type="button" data-agent-run ${!agentRuntime.connected || agentRuntime.running || (!realLeadCount && !realProjectCount) ? 'disabled' : ''}>${agentRuntime.running ? '⟳ Agentes trabalhando…' : '▶ Executar agentes'}</button></div>
     </header>
-    <p class="agent-demo-notice" role="note"><strong>Execução local e controlada.</strong> Os sete perfis internos analisam os dados sem editar o CRM. O Pesquisador web é acionado pelo chat, usa busca web do Codex e apresenta fontes para você conferir. Nada é salvo no CRM nem enviado a empresas. Cada função consome o uso do plano Codex.</p>
+      <p class="agent-demo-notice" role="note"><strong>Execução local e controlada.</strong> Os sete perfis internos analisam os dados sem editar o CRM. O Pesquisador web usa a busca do Codex e prepara empresas para sua conferência; só entram no painel quando você seleciona e confirma a importação. Nenhuma mensagem é enviada. Cada pesquisa usa o limite do plano Codex.</p>
     <div class="agent-status-strip" aria-label="Estados atuais dos agentes">
       <span class="agent-status-count"><i class="agent-state-dot working"></i><strong>${counts.working}</strong> trabalhando</span>
       <span class="agent-status-count"><i class="agent-state-dot approval"></i><strong>${counts.approval}</strong> concluídos</span>
@@ -394,9 +395,19 @@ function renderAgents() {
     <section class="agent-activity-panel" aria-label="Resultados das execuções">
       <div class="agent-activity-heading"><div><h2>Execuções e resultados</h2><p>${agentRuntime.running ? 'Os agentes estão trabalhando em sequência; esta tela atualiza automaticamente.' : 'Resumo da última execução e detalhes separados por função.'}</p></div><span class="mono">${selectedRun?.startedAt ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(selectedRun.startedAt)) : 'Sem execução'}</span></div>
       ${selectedRun ? `<div class="agent-run-summary"><div class="agent-run-summary-top"><div><span class="summary-title">Resumo da execução</span><strong class="summary-state">${runStateLabel}</strong></div><span class="summary-completion ${errorCount ? 'has-errors' : ''}">${completedCount}/${selectedRun.tasks.length} funções concluídas</span></div><div class="agent-summary-metrics"><span><strong>${selectedRun.leadCount ?? 0}</strong> leads analisados</span><span><strong>${selectedRun.projectCount ?? 0}</strong> projetos analisados</span><span><strong>${errorCount}</strong> com erro</span><span>Origem: <strong>${esc(runSourceLabel)}</strong></span></div></div><div class="agent-details-heading"><div><h3>Detalhes por agente</h3><p>Escolha uma função para ler a análise completa.</p></div></div><div class="agent-results-list">${selectedRun.tasks.map((task) => `<button class="agent-result-row ${selectedAgentId === task.id ? 'selected' : ''}" data-agent-id="${task.id}" type="button" aria-pressed="${selectedAgentId === task.id}"><strong>${esc(task.name)}</strong><span>${task.state === 'working' ? 'Trabalhando…' : task.state === 'complete' ? 'Concluído' : task.state === 'error' ? 'Erro' : task.state === 'queued' ? 'Na fila' : 'Pendente'}</span></button>`).join('')}</div><article class="agent-selected-detail" aria-live="polite"><div class="agent-selected-detail-heading"><div><h4>${esc(selected[1])}</h4><span>${detailState}</span></div>${taskForSelected?.state === 'working' ? '<i class="agent-state-dot working" aria-label="Em execução"></i>' : ''}</div>${taskForSelected?.result ? `<pre class="agent-result">${formatAgentResult(taskForSelected.result)}</pre>` : taskForSelected?.error ? `<pre class="agent-result agent-result-error">${esc(taskForSelected.error)}</pre>` : `<p class="agent-detail-empty">${taskForSelected?.state === 'queued' ? 'Este agente inicia depois que os anteriores concluírem.' : taskForSelected?.state === 'working' ? 'O resultado será exibido aqui quando a análise terminar.' : 'Ainda não há resultado para esta função.'}</p>`}</article>` : `<div class="agent-run-status">${agentRuntime.connected ? 'Executor conectado. Nenhuma execução iniciada.' : 'Executor local desconectado. Inicie-o no Windows para habilitar o botão.'}</div>`}
+      ${selectedRun?.candidates?.length ? renderResearchCandidates(selectedRun) : ''}
       <p class="agent-local-note">Este executor roda só neste PC. O site público e o celular continuam sem acesso a ele até configurarmos uma ponte autenticada.</p>
     </section>
   </div>`;
+}
+function renderResearchCandidates(run) {
+  const rows = run.candidates.map((candidate, index) => {
+    const selectionKey = `${run.id}:${index}`;
+    const mapsUrl = safeUrl(candidate.mapsUrl) || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([candidate.name, candidate.city].join(' '))}`;
+    const sourceUrl = safeUrl(candidate.sourceUrl);
+    return `<label class="research-candidate"><input type="checkbox" data-research-run="${esc(run.id)}" data-research-candidate="${index}" ${researchSelection.has(selectionKey) ? 'checked' : ''}><span class="research-candidate-main"><strong>${esc(candidate.name)}</strong><small>${esc(candidate.category)} · ${esc(candidate.city)}</small><span>${esc(candidate.evidence)}</span><span class="research-candidate-status">Etapa de entrada: precisa verificar · Fogo inicial: 50/100</span></span><span class="research-candidate-links"><a href="${esc(mapsUrl)}" target="_blank" rel="noopener noreferrer">Abrir Maps ↗</a>${sourceUrl ? `<a href="${esc(sourceUrl)}" target="_blank" rel="noopener noreferrer">Ver fonte ↗</a>` : ''}${candidate.websiteUrl ? `<a href="${esc(safeUrl(candidate.websiteUrl) || '#')}" target="_blank" rel="noopener noreferrer">Site ↗</a>` : ''}</span></label>`;
+  }).join('');
+  return `<section class="research-import-panel"><div><h3>Empresas propostas para o painel</h3><p>Confira cada ficha e marque apenas as empresas que reconhece. A importação não envia mensagens; os leads entram como “Precisa verificar”.</p></div><div class="research-candidate-list">${rows}</div><div class="research-import-actions"><span>Empresas duplicadas serão ignoradas.</span><button type="button" class="primary-btn" data-import-research-candidates="${esc(run.id)}" disabled>Importar selecionadas</button></div></section>`;
 }
 function renderProjectCard(project) { const index = PROJECT_STAGES.findIndex(([id]) => id === project.stage); const count = countdown(project.dueDate); const lead = leadById(project.leadId); return `<article class="project-card"><div class="card-top"><div><div class="card-name">${esc(project.name)}</div><div class="card-location">${esc(project.service)}</div></div><span class="status-badge ${count.overdue ? 'red' : count.urgent ? 'yellow' : 'green'}" data-countdown-date="${esc(project.dueDate || '')}" data-countdown-tone="status">${count.text}</span></div><div class="stage-heading"><span>Progresso do projeto</span><strong>Etapa ${index + 1} de ${PROJECT_STAGES.length}</strong></div><div class="stage-map" aria-label="Etapas do projeto">${PROJECT_STAGES.map(([id, label], i) => `<div class="stage-item ${i < index ? 'done' : i === index ? 'current' : ''}"><span class="stage-marker">${i < index ? '✓' : i === index ? '●' : i + 1}</span><span class="stage-label">${label}</span></div>`).join('')}</div><div class="project-progress" aria-label="${Math.round(((index + 1) / PROJECT_STAGES.length) * 100)}% concluído"><span style="width:${Math.max(8, ((index + 1) / PROJECT_STAGES.length) * 100)}%"></span></div><div class="project-dates"><span>Início: ${formatDate(project.startDate)}</span><span>Limite: ${formatDate(project.dueDate)}</span></div><div class="card-footer"><span class="muted">${lead ? esc(lead.name) : 'Projeto cadastrado'}</span><button class="detail-link" data-project-id="${project.id}">Editar etapas →</button></div></article>`; }
 
@@ -421,7 +432,7 @@ function bindPageEvents() {
   all('[data-action="new-project"]').forEach((button) => button.addEventListener('click', openProjectModal));
   all('[data-action="import-leads-json"]').forEach((button) => button.addEventListener('click', () => el('#lead-json-file')?.click()));
   el('#lead-json-file')?.addEventListener('change', importLeadsJsonFile);
-  all('[data-action="maps-task"]').forEach((button) => button.addEventListener('click', () => toast('Pesquisa assistida: escolha nicho e região no Google Maps e cadastre os resultados aqui.')));
+  all('[data-action="maps-task"]').forEach((button) => button.addEventListener('click', () => { assistantOpen = true; renderAssistant(); const input = el('#assistant-input'); if (input) { input.value = 'Pesquise empresas no Google Maps: [nicho] em [cidade, estado]. Traga candidatos com links e evidências para eu revisar.'; input.focus(); input.setSelectionRange(input.value.indexOf('['), input.value.lastIndexOf(']') + 1); } }));
   all('[data-lead-id]').forEach((button) => button.addEventListener('click', (event) => { if (event.target.closest('select')) return; openLeadDetail(button.dataset.leadId); }));
   all('[data-project-id]').forEach((button) => button.addEventListener('click', () => openProjectDetail(button.dataset.projectId)));
   all('[data-lead-filter]').forEach((button) => button.addEventListener('click', () => { leadFilter = button.dataset.leadFilter; renderPages(); }));
@@ -434,6 +445,14 @@ function bindPageEvents() {
   all('[data-action="export"]').forEach((button) => button.addEventListener('click', exportData));
   all('[data-action="reset"]').forEach((button) => button.addEventListener('click', resetData));
   all('[data-agent-id]').forEach((button) => button.addEventListener('click', () => { selectedAgentId = button.dataset.agentId; renderPages(); }));
+  all('[data-research-candidate]').forEach((checkbox) => checkbox.addEventListener('change', () => {
+    const key = `${checkbox.dataset.researchRun}:${checkbox.dataset.researchCandidate}`;
+    if (checkbox.checked) researchSelection.add(key); else researchSelection.delete(key);
+    const importButton = all('[data-import-research-candidates]').find((button) => button.dataset.importResearchCandidates === checkbox.dataset.researchRun);
+    const count = all('[data-research-candidate]:checked').filter((item) => item.dataset.researchRun === checkbox.dataset.researchRun).length;
+    if (importButton) { importButton.disabled = count === 0; importButton.textContent = count ? `Importar selecionadas (${count})` : 'Importar selecionadas'; }
+  }));
+  all('[data-import-research-candidates]').forEach((button) => button.addEventListener('click', () => importResearchCandidates(button.dataset.importResearchCandidates)));
   el('[data-agent-run]')?.addEventListener('click', runAgents);
   el('[data-agent-import]')?.addEventListener('click', () => el('#agent-data-file')?.click());
   el('#agent-data-file')?.addEventListener('change', importAgentDataset);
@@ -692,6 +711,47 @@ function saveLeadDetails(event) {
 function openDeleteLeadConfirmation(id) { const lead = leadById(id); if (!lead) return; modal(`<div class="modal-header"><div><p class="page-kicker">Confirmação necessária</p><h2>Excluir ${esc(lead.name)}?</h2><p>Esta ação remove o cliente e os registros relacionados.</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><div class="delete-warning"><strong>Serão removidos:</strong><span>este lead, seus projetos e rascunhos de mensagem.</span></div><div class="modal-actions"><button class="ghost-btn" data-modal-close>Cancelar</button><button class="danger-btn" data-confirm-delete-lead="${esc(lead.id)}">Confirmar exclusão</button></div>`); el('[data-confirm-delete-lead]')?.addEventListener('click', () => deleteLead(id)); }
 function deleteLead(id) { const lead = leadById(id); if (!lead) return; const name = lead.name.trim().toLocaleLowerCase('pt-BR'); state.leads = state.leads.filter((item) => item.id !== id); state.projects = state.projects.filter((item) => item.leadId !== id && String(item.name || '').trim().toLocaleLowerCase('pt-BR') !== name); state.messages = state.messages.filter((item) => item.leadId !== id); if (currentLeadId === id) currentLeadId = null; if (currentMessageId && !state.messages.some((item) => item.id === currentMessageId)) currentMessageId = null; persist(); closeModal(); renderPages(); toast(`${lead.name} e os registros relacionados foram excluídos.`); }
 function updateLeadStage(id, stage) { const lead = leadById(id); if (!lead) return; lead.stage = stage; if (stage === 'contatado' && !lead.responseDue) lead.responseDue = daysFromNow(7); persist(); renderPages(); toast(`Etapa atualizada: ${stageLabel(stage)}.`); }
+
+function importResearchCandidates(runId) {
+  const run = agentRuntime.currentRun?.id === runId ? agentRuntime.currentRun : agentRuntime.history?.find((item) => item.id === runId);
+  if (!run?.candidates?.length) { toast('Esta pesquisa não contém empresas importáveis.'); return; }
+  const selected = [...researchSelection].filter((key) => key.startsWith(`${runId}:`)).map((key) => Number(key.slice(runId.length + 1))).filter((index) => Number.isInteger(index) && run.candidates[index]);
+  if (!selected.length) { toast('Marque pelo menos uma empresa para importar.'); return; }
+  const known = new Set([...state.leads, ...(agentDataset?.leads || [])].map((lead) => `${importKey(lead.name)}|${importKey(lead.city)}`));
+  const proposed = [];
+  let duplicates = 0;
+  for (const index of selected) {
+    const candidate = run.candidates[index];
+    const key = `${importKey(candidate.name)}|${importKey(candidate.city)}`;
+    if (!candidate.name || !candidate.category || !candidate.city || known.has(key)) { duplicates += 1; continue; }
+    known.add(key);
+    proposed.push(candidate);
+  }
+  if (!proposed.length) { toast(`${duplicates} duplicada${duplicates === 1 ? '' : 's'} ignorada${duplicates === 1 ? '' : 's'}.`); return; }
+  const names = proposed.slice(0, 5).map((candidate) => candidate.name).join(', ');
+  const more = proposed.length > 5 ? ` e mais ${proposed.length - 5}` : '';
+  if (!confirm(`Adicionar ${proposed.length} empresa${proposed.length === 1 ? '' : 's'} ao painel?\n\n${names}${more}\n\nEntram como “Precisa verificar”, com fogo neutro 50/100, sem mensagem pronta e sem contato enviado. Confira cada link e dado depois da importação.`)) return;
+  const added = proposed.map((candidate) => {
+    const mapsUrl = safeUrl(candidate.mapsUrl) || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([candidate.name, candidate.city].join(' '))}`;
+    return {
+      id: uid('lead'), name: candidate.name, category: candidate.category, city: candidate.city, phone: candidate.phone || '',
+      website: 'Não verificado', websiteUrl: safeUrl(candidate.websiteUrl), maps: 'Não verificado', mapsUrl,
+      instagramUrl: safeUrl(candidate.instagramUrl), instagramStatus: 'Não verificado', heat: 50, stage: 'verificar',
+      evidence: `Pesquisa pública preliminar pelo Codex. Conferir identidade, site, Maps e Instagram antes do contato. ${candidate.evidence || ''}`.trim(),
+      source: candidate.source || 'Pesquisa pública assistida pelo Codex', sourceUrl: safeUrl(candidate.sourceUrl) || mapsUrl,
+      notes: '', nextAction: 'Conferir ficha do Maps e presença digital', responseDue: null, createdAt: isoDate(Date.now()), demo: false
+    };
+  });
+  state.leads.unshift(...added);
+  state.settings.demo = false;
+  currentLeadId = added[0]?.id || currentLeadId;
+  researchSelection.clear();
+  persist();
+  currentPage = 'leads';
+  renderShell();
+  renderPages();
+  toast(`${added.length} lead${added.length === 1 ? '' : 's'} adicionado${added.length === 1 ? '' : 's'}; ${duplicates} duplicada${duplicates === 1 ? '' : 's'} ignorada${duplicates === 1 ? '' : 's'}.`);
+}
 
 function openProjectModal() { modal(`<div class="modal-header"><div><p class="page-kicker">Novo acompanhamento</p><h2>Criar projeto</h2><p>Use dias corridos para acompanhar a produção.</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><form id="project-form"><div class="form-grid"><label class="field"><span>Nome do projeto *</span><input class="field-input" name="name" required placeholder="Ex.: Studio Aquarela" /></label><label class="field"><span>Serviço</span><input class="field-input" name="service" value="Landing page + hospedagem anual" /></label><label class="field"><span>Data de início *</span><input class="field-input" type="date" name="startDate" value="${new Date().toISOString().slice(0, 10)}" required /></label><label class="field"><span>Prazo em dias corridos *</span><input class="field-input" type="number" name="days" value="7" min="1" max="365" required /></label><label class="field full"><span>Observações</span><textarea class="field-textarea" name="notes" placeholder="Materiais recebidos, escopo, próxima ação..."></textarea></label></div><div class="modal-actions"><button type="button" class="ghost-btn" data-modal-close>Cancelar</button><button class="primary-btn" type="submit">Criar projeto</button></div></form>`); el('#project-form').addEventListener('submit', saveProject); }
 function saveProject(event) { event.preventDefault(); const form = new FormData(event.target); const start = new Date(`${form.get('startDate')}T09:00:00`); const project = { id: uid('project'), leadId: '', name: form.get('name'), service: form.get('service'), stage: 'confirmado', startDate: isoDate(start), dueDate: isoDate(start.getTime() + Number(form.get('days')) * 86400000), notes: form.get('notes'), demo: false }; state.projects.unshift(project); state.settings.demo = false; persist(); closeModal(); toast('Projeto criado com prazo em dias corridos.'); renderPages(); }

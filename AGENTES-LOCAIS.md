@@ -2,7 +2,7 @@
 
 ## O que esta integração faz
 
-O botão **Executar agentes** inicia sete processos independentes do Codex CLI, um para cada perfil interno em `.codex/agents/`. Eles recebem somente os registros reais carregados no navegador e produzem análises para revisão. O chat também pode iniciar o perfil **Pesquisador web**, que usa a busca web nativa do Codex CLI e apresenta links para revisão. Nenhuma dessas funções envia mensagens, altera etapas/fogo nem grava resultados no CRM.
+O botão **Executar agentes** inicia sete processos independentes do Codex CLI, um para cada perfil interno em `.codex/agents/`. Eles recebem somente os registros reais carregados no navegador e produzem análises para revisão. O chat também pode iniciar o perfil **Pesquisador web**, que usa a busca web nativa do Codex CLI e apresenta links e candidatos estruturados. A pesquisa não grava leads por conta própria; o operador pode selecionar e confirmar a importação. Nenhuma dessas funções envia mensagens.
 
 Os playbooks adaptam, em português e para a venda de landing pages a negócios locais, ideias de qualificação, sinais, escrita, tratamento de respostas e análise do funil descritas pelo projeto open source Harvey. A licença e a atribuição estão em `THIRD-PARTY-NOTICES.md`. O aplicativo Harvey não está instalado aqui: seu README atual restringe o uso de Codex a macOS/Linux e não declara suporte a Windows.
 
@@ -22,10 +22,11 @@ As chamadas usam a conta autenticada no Codex CLI. Não configuramos chave de AP
 - O botão de conversa fica fixo no canto inferior direito do app.
 - Perguntas comuns são respondidas pelo Codex CLI autenticado. Cada resposta usa o plano Codex.
 - Um pedido explícito para analisar, revisar ou qualificar leads/projetos inicia os sete perfis em sequência, incluindo o **Analista de funil**, e abre a tela **Agentes**.
-- Um comando direto como **“Pesquise pet shops em São Carlos com fontes”** inicia uma chamada de pesquisa web e mostra o agente e o resultado em **Agentes**.
+- Um comando direto como **“Pesquise pet shops em São Carlos no Google Maps”** inicia uma pesquisa web do Codex e apresenta links, evidências e candidatos para revisar em **Agentes**.
 - O chat usa os registros reais carregados no navegador ou o JSON importado. Sem dados reais, peça para importar a exportação em **Agentes**.
-- A pesquisa usa `codex exec --search`, disponível no Codex CLI instalado. Ela usa a cota do plano Codex autenticado; não configuramos chave de API. Para consultar Maps, o agente pode trazer links públicos de pesquisa ou perfis encontrados, mas a confirmação do cadastro continua com o operador.
-- O chat não altera o CRM, não publica sites e não envia mensagens.
+- A pesquisa usa `codex exec --search`, disponível no Codex CLI instalado. Ela usa a cota do plano Codex autenticado; não configuramos chave de API. O agente tenta localizar perfis públicos do Maps pela busca web; isso não é Places API e não garante que a ficha ou o cadastro estejam completos.
+- Leads importados após confirmação entram como **Precisa verificar**, fogo neutro 50/100, sem rascunho e sem contato realizado. Duplicatas por nome/cidade são ignoradas.
+- O chat não publica sites e não envia mensagens.
 - O histórico da conversa fica no armazenamento local deste navegador; não sincroniza com Cloudflare D1 nem com outros dispositivos.
 
 O Codex CLI precisa estar instalado e autenticado (`codex login status`). Não instale Maestri ou tmux para essa integração: eles servem para gerenciar/observar terminais, não para substituir o executor do painel.

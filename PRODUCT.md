@@ -25,7 +25,7 @@ Prospects are found and checked manually, including Google Maps and digital pres
 - In local development, a separate Node runtime can run seven Codex CLI profiles sequentially to analyze records and an eighth web researcher on demand using Codex CLI's native web-search tool.
 - Internal sales playbooks adapt Harvey-inspired prospect qualification, evidence-backed signals, human-reviewed writing, respectful reply handling, and funnel analysis. Harvey itself is not installed because its current Codex setup supports macOS/Linux rather than Windows.
 - The floating assistant is available only when the local Codex runtime is running. It can answer from supplied context, start a read-only internal analysis, or perform a public web search with cited links when explicitly asked.
-- The web researcher is read-only: it does not edit CRM data, publish sites, or contact businesses. Codex CLI's web search consumes the authenticated Codex plan allowance and does not require an API key.
+- The web researcher is read-only and returns source-backed lead proposals. The operator may select and confirm import into the local CRM; imported records start at manual verification with neutral heat and no draft or contact sent. Codex CLI web search consumes the authenticated Codex plan allowance and does not require an API key.
 - The public Cloudflare app and mobile clients cannot connect to the local agent runtime until a protected remote execution bridge is designed and configured.
 - Sending messages to prospects remains a manual, user-approved action.
 
