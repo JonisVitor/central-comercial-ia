@@ -368,7 +368,7 @@ function renderAgents() {
       <div><h1>Equipe de agentes</h1><p class="lede">Execuções reais do Codex CLI, sob demanda e com revisão humana.</p></div>
       <div class="agents-page-actions"><span class="simulation-badge ${agentRuntime.connected ? 'runtime-online' : ''}"><span class="simulation-dot"></span>${agentRuntime.connected ? 'Codex local conectado' : 'Executor local desconectado'}</span><button class="ghost-btn" type="button" data-agent-import>Importar JSON</button><input id="agent-data-file" type="file" accept=".json,application/json" hidden /><button class="primary-btn" type="button" data-agent-run ${!agentRuntime.connected || agentRuntime.running || (!realLeadCount && !realProjectCount) ? 'disabled' : ''}>${agentRuntime.running ? '⟳ Agentes trabalhando…' : '▶ Executar agentes'}</button></div>
     </header>
-      <p class="agent-demo-notice" role="note"><strong>Execução local e controlada.</strong> Os sete perfis internos analisam os dados sem editar o CRM. O Pesquisador web usa a busca do Codex e prepara empresas para sua conferência; só entram no painel quando você seleciona e confirma a importação. Nenhuma mensagem é enviada. Cada pesquisa usa o limite do plano Codex.</p>
+      <p class="agent-demo-notice" role="note"><strong>Fluxo local do Codex.</strong> Peça um nicho e uma cidade pelo chat para pesquisar, verificar, qualificar e preparar mensagem e roteiro. Leads aprovados entram no painel aguardando sua revisão; o envio e a criação das LPs continuam com você. Cada execução consome o limite do plano Codex e a busca pública não garante cobertura completa do Maps.</p>
     <div class="agent-status-strip" aria-label="Estados atuais dos agentes">
       <span class="agent-status-count"><i class="agent-state-dot working"></i><strong>${counts.working}</strong> trabalhando</span>
       <span class="agent-status-count"><i class="agent-state-dot approval"></i><strong>${counts.approval}</strong> concluídos</span>
@@ -395,7 +395,7 @@ function renderAgents() {
     <section class="agent-activity-panel" aria-label="Resultados das execuções">
       <div class="agent-activity-heading"><div><h2>Execuções e resultados</h2><p>${agentRuntime.running ? 'Os agentes estão trabalhando em sequência; esta tela atualiza automaticamente.' : 'Resumo da última execução e detalhes separados por função.'}</p></div><span class="mono">${selectedRun?.startedAt ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(selectedRun.startedAt)) : 'Sem execução'}</span></div>
       ${selectedRun ? `<div class="agent-run-summary"><div class="agent-run-summary-top"><div><span class="summary-title">Resumo da execução</span><strong class="summary-state">${runStateLabel}</strong></div><span class="summary-completion ${errorCount ? 'has-errors' : ''}">${completedCount}/${selectedRun.tasks.length} funções concluídas</span></div><div class="agent-summary-metrics"><span><strong>${selectedRun.leadCount ?? 0}</strong> leads analisados</span><span><strong>${selectedRun.projectCount ?? 0}</strong> projetos analisados</span><span><strong>${errorCount}</strong> com erro</span><span>Origem: <strong>${esc(runSourceLabel)}</strong></span></div></div><div class="agent-details-heading"><div><h3>Detalhes por agente</h3><p>Escolha uma função para ler a análise completa.</p></div></div><div class="agent-results-list">${selectedRun.tasks.map((task) => `<button class="agent-result-row ${selectedAgentId === task.id ? 'selected' : ''}" data-agent-id="${task.id}" type="button" aria-pressed="${selectedAgentId === task.id}"><strong>${esc(task.name)}</strong><span>${task.state === 'working' ? 'Trabalhando…' : task.state === 'complete' ? 'Concluído' : task.state === 'error' ? 'Erro' : task.state === 'queued' ? 'Na fila' : 'Pendente'}</span></button>`).join('')}</div><article class="agent-selected-detail" aria-live="polite"><div class="agent-selected-detail-heading"><div><h4>${esc(selected[1])}</h4><span>${detailState}</span></div>${taskForSelected?.state === 'working' ? '<i class="agent-state-dot working" aria-label="Em execução"></i>' : ''}</div>${taskForSelected?.result ? `<pre class="agent-result">${formatAgentResult(taskForSelected.result)}</pre>` : taskForSelected?.error ? `<pre class="agent-result agent-result-error">${esc(taskForSelected.error)}</pre>` : `<p class="agent-detail-empty">${taskForSelected?.state === 'queued' ? 'Este agente inicia depois que os anteriores concluírem.' : taskForSelected?.state === 'working' ? 'O resultado será exibido aqui quando a análise terminar.' : 'Ainda não há resultado para esta função.'}</p>`}</article>` : `<div class="agent-run-status">${agentRuntime.connected ? 'Executor conectado. Nenhuma execução iniciada.' : 'Executor local desconectado. Inicie-o no Windows para habilitar o botão.'}</div>`}
-      ${selectedRun?.candidates?.length ? renderResearchCandidates(selectedRun) : ''}
+      ${selectedRun?.candidates?.length && selectedRun.kind !== 'prospecting' ? renderResearchCandidates(selectedRun) : ''}
       <p class="agent-local-note">Este executor roda só neste PC. O site público e o celular continuam sem acesso a ele até configurarmos uma ponte autenticada.</p>
     </section>
   </div>`;
@@ -463,6 +463,7 @@ async function refreshAgentRuntime(shouldRender = true) {
     const response = await fetch('/api/agent-runtime/health', { cache: 'no-store' });
     if (!response.ok) throw new Error('Executor local indisponível.');
     agentRuntime = await response.json();
+    autoImportProspectingRuns();
     if (assistantOpen && wasConnected !== agentRuntime.connected) renderAssistant();
     if (shouldRender && currentPage === 'agents') renderPages();
   } catch {
@@ -470,6 +471,28 @@ async function refreshAgentRuntime(shouldRender = true) {
     if (assistantOpen && wasConnected) renderAssistant();
     if (shouldRender && currentPage === 'agents') renderPages();
   }
+}
+
+function autoImportProspectingRuns() {
+  if (!isLocalHost) return;
+  const processed = new Set(JSON.parse(localStorage.getItem('central-prospecting-imported-v1') || '[]'));
+  let changed = false;
+  for (const run of agentRuntime.history || []) {
+    if (run.kind !== 'prospecting' || run.state !== 'complete' || processed.has(run.id)) continue;
+    processed.add(run.id);
+    const existing = new Set(state.leads.map(lead => `${importKey(lead.name)}|${importKey(lead.city)}`));
+    const ready = (run.candidates || []).filter(item => item.name && item.city && item.message && item.salesScript && !existing.has(`${importKey(item.name)}|${importKey(item.city)}`));
+    for (const item of ready) {
+      const mapsUrl = safeUrl(item.mapsUrl) || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${item.name} ${item.city}`)}`;
+      const lead = { id:uid('lead'),name:item.name,category:item.category,city:item.city,phone:item.phone||'',website:item.website||'Não verificado',websiteUrl:safeUrl(item.websiteUrl),maps:item.maps==='Não encontrado'?'Não encontrado':'Não verificado',mapsUrl,instagramUrl:safeUrl(item.instagramUrl),instagramStatus:item.instagramStatus||'Não verificado',heat:Number(item.heat)||30,heatRationale:item.heatRationale||'',stage:'aprovacao',evidence:item.evidence||'',source:'Pesquisa pública assistida pelo Codex',sourceUrl:safeUrl(item.sourceUrl)||mapsUrl,nextAction:'Revisar a mensagem e o roteiro antes de enviar',salesScript:item.salesScript,notes:'Importado automaticamente pelo fluxo local do Codex; confira os dados e links.',responseDue:null,createdAt:isoDate(Date.now()),demo:false };
+      state.leads.unshift(lead);
+      state.messages.unshift({id:uid('message'),leadId:lead.id,text:item.message,sentAt:null});
+      existing.add(`${importKey(lead.name)}|${importKey(lead.city)}`); changed=true;
+    }
+    if (ready.length) toast(`${ready.length} lead${ready.length===1?'':'s'} verificado${ready.length===1?'':'s'} adicionado${ready.length===1?'':'s'} com mensagem em aprovação. Nada foi enviado.`);
+  }
+  localStorage.setItem('central-prospecting-imported-v1',JSON.stringify([...processed].slice(-100)));
+  if (changed) { state.settings.demo=false; persist(); if(currentPage==='agents'){renderPages();} }
 }
 async function runAgents() {
   const button = el('[data-agent-run]');
@@ -604,6 +627,7 @@ function openLeadDetail(id) {
     <h3 class="detail-section-title">Acompanhamento</h3><div class="form-grid">
       <label class="field full"><span>O que você encontrou</span><textarea class="field-textarea" name="evidence">${esc(lead.evidence || '')}</textarea></label>
       <label class="field full"><span>Próxima ação</span><input class="field-input" name="nextAction" value="${esc(lead.nextAction || '')}" placeholder="Ex.: enviar mensagem" /></label>
+      <label class="field full"><span>Roteiro da conversa</span><textarea class="field-textarea" name="salesScript" placeholder="Perguntas e respostas sugeridas para a conversa">${esc(lead.salesScript || '')}</textarea><small class="field-help">Sugestão para você adaptar. O painel não conversa nem envia mensagens automaticamente.</small></label>
       <label class="field full"><span>Notas</span><textarea class="field-textarea" name="notes">${esc(lead.notes || '')}</textarea></label>
     </div></section><aside class="lead-workflow">${renderLeadWorkflow(lead, message, project, instagramStatus)}</aside></div>
     <div class="modal-actions lead-edit-actions"><button type="button" class="danger-btn" data-delete-lead="${esc(lead.id)}">Excluir cliente</button><span class="action-spacer"></span><button type="button" class="ghost-btn" data-modal-close>Fechar</button>${message ? `<button type="button" class="ghost-btn" data-go-messages="${esc(lead.id)}">Abrir conversa</button>` : ''}<button class="primary-btn" type="submit">Salvar alterações</button></div></form>`, 'modal-lead-detail');
@@ -689,7 +713,7 @@ function saveLeadDetails(event) {
   const mapsUrl = String(form.get('mapsUrl') || '').trim();
   const instagramUrl = String(form.get('instagramUrl') || '').trim();
   if ((websiteUrl && !safeUrl(websiteUrl)) || (mapsUrl && !safeUrl(mapsUrl)) || (instagramUrl && !safeUrl(instagramUrl))) { toast('Confira os links. Use um endereço válido, como https://exemplo.com.'); return; }
-  for (const field of ['name', 'category', 'city', 'phone', 'evidence', 'nextAction', 'notes']) lead[field] = String(form.get(field) || '').trim();
+  for (const field of ['name', 'category', 'city', 'phone', 'evidence', 'nextAction', 'notes', 'salesScript']) lead[field] = String(form.get(field) || '').trim();
   lead.website = String(form.get('website'));
   lead.websiteUrl = safeUrl(websiteUrl);
   lead.maps = String(form.get('maps'));

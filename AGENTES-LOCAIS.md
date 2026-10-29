@@ -44,3 +44,12 @@ O Codex CLI precisa estar instalado e autenticado (`codex login status`). Não i
 - O agente de mensagens prepara rascunhos; não existe um Sender automático. O operador revisa e envia manualmente.
 
 Se o projeto estiver em outro computador Windows, instale Node.js, o app Codex/Codex CLI, entre na conta e autentique o CLI antes de seguir os passos acima.
+# Fluxo de prospecção integrado (v0.6.0)
+
+No chat da Central local, pedidos diretos com nicho e cidade (por exemplo, “quero lanchonetes em São Carlos”) iniciam uma execução sequencial do Codex CLI autenticado: pesquisa web pública, triagem/deduplicação, verificação pública, qualificação, rascunho de WhatsApp e roteiro de conversa, e resumo.
+
+As execuções de prospecção podem usar a busca web nativa do Codex. Não usam Places API nem chave de API. A busca não é exaustiva e não garante cobertura completa do Google Maps. Só entram no CRM local negócios com identidade e fonte confirmadas, qualificação elegível e mensagem/roteiro gerados. Duplicados são ignorados. O score de 0–100 é um sinal explicável de oportunidade, não probabilidade de compra.
+
+O CRM recebe leads na etapa “Aguardando aprovação”; os rascunhos e roteiros ficam editáveis. Nunca enviar mensagem automaticamente. A aprovação, abertura do WhatsApp/envio e criação de landing pages continuam manuais. Os dados ficam no armazenamento local deste navegador e não sincronizam com Cloudflare D1.
+
+Cada etapa consome o limite de uso do Codex autenticado; uma execução pode iniciar várias chamadas sequenciais. Para reduzir custo, o fluxo limita a pesquisa a 15 empresas por padrão (máximo 20) e não preenche resultados ausentes por invenção.
