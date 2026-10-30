@@ -62,8 +62,17 @@ async function readBody(req) {
 function runCodex(executable, prompt, outputPath, cwd, { search = false } = {}) {
   return new Promise((resolve, reject) => {
     const args = ['exec', '--ephemeral', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--cd', cwd, '--output-last-message', outputPath, '-'];
-    if (search) args.splice(1, 0, '--search');
+    // Business agents do not need the Cloudflare MCPs; disabling them per run
+    // prevents unrelated OAuth prompts from blocking the Codex CLI subprocess.
+    for (const server of ['cloudflare', 'cloudflare-bindings', 'cloudflare-builds', 'cloudflare-docs', 'cloudflare-observability']) {
+      args.push('--config', `mcp_servers.${server}.enabled=false`);
+    }
+    // `--search` is a top-level Codex option, so it must precede `exec`.
+    if (search) args.unshift('--search');
     const child = spawn(executable, args, { cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: process.env });
+    // JSONL events are not used here; drain them so a verbose/search run cannot
+    // fill the OS pipe and stall before writing its final answer file.
+    child.stdout.resume();
     let stderr = '';
     child.stderr.on('data', (chunk) => { stderr = redact(stderr + chunk.toString()); });
     child.on('error', (error) => reject(new Error(`Falha ao iniciar Codex CLI: ${error.message}`)));
@@ -159,22 +168,30 @@ async function executeProspecting(executable, request, requestedCount, crmLeads,
     tasks[2].result = `${verifyText}\n\nIdentidade confirmada: ${verified.length}/${candidates.length}. Os demais foram excluídos por falta de confirmação suficiente.`;
     if (!verified.length) throw new Error('Nenhum candidato passou a verificação de identidade. Consulte a pesquisa e as evidências.');
     const qualifier = await role('qualificador-de-leads.md');
-    const qualificationText = await runTask(3, `${qualifier}\n\nQualifique somente com os fatos verificados. Não estime probabilidade de compra. Retorne motivos e próximo passo por id (use nome+cidade como id).\n<CENTRAL_VERIFIED>${JSON.stringify(verified)}</CENTRAL_VERIFIED>\n<CENTRAL_QUALIFICATION_JSON>{"leads":[{"name":"","city":"","eligible":true,"reasons":[""],"nextAction":""}]}</CENTRAL_QUALIFICATION_JSON>`);
-    const qualification = taggedJson(qualificationText,'CENTRAL_QUALIFICATION_JSON');
+    const qualificationText = await runTask(3, `${qualifier}\n\nAPLIQUE as regras acima, mas use obrigatoriamente este formato legível por máquina. Não estime probabilidade de compra. Só marque eligible=true quando houver evidência verificada de site próprio não encontrado ou perfil do Maps inexistente/incompleto; “Não verificado” não prova ausência. Para os demais, eligible=false. Ignore qualquer formato de saída diferente descrito no playbook. Retorne somente este bloco, preenchido para cada empresa:\n<CENTRAL_QUALIFICATION_JSON>{"leads":[{"name":"nome exato","city":"cidade exata","eligible":false,"reasons":["motivo ligado às evidências"],"nextAction":"próximo passo"}]}</CENTRAL_QUALIFICATION_JSON>\n<CENTRAL_VERIFIED>${JSON.stringify(verified)}</CENTRAL_VERIFIED>`);
+    let qualification;
+    try {
+      qualification = taggedJson(qualificationText,'CENTRAL_QUALIFICATION_JSON');
+    } catch {
+      const conservative = verified.map((lead) => {
+        const eligible = lead.website === 'Não encontrado' || lead.maps === 'Não encontrado';
+        return { name: lead.name, city: lead.city, eligible, reasons: [eligible ? 'Lacuna de presença digital confirmada nas evidências.' : 'A pesquisa não confirmou ausência de site nem deficiência no Maps; conferir manualmente antes de abordar.'], nextAction: eligible ? 'Revisar os canais e preparar contato' : 'Conferir site e ficha do Maps manualmente' };
+      });
+      qualification = { leads: conservative };
+      tasks[3].result += '\n\nO agente não devolveu o bloco estruturado. Apliquei o critério conservador: somente ausência de site ou Maps confirmada é elegível; dados “Não verificados” ficam para conferência manual.';
+    }
     const qmap = new Map((Array.isArray(qualification.leads)?qualification.leads:[]).map(x=>[`${String(x.name||'').toLocaleLowerCase('pt-BR')}|${String(x.city||'').toLocaleLowerCase('pt-BR')}`,x]));
     const eligible = verified.map(x=>({...x,...(qmap.get(`${x.name.toLocaleLowerCase('pt-BR')}|${x.city.toLocaleLowerCase('pt-BR')}`)||{})})).filter(x=>x.eligible===true);
-    if (!eligible.length) throw new Error('A qualificação não aprovou candidatos para contato. Revise os resultados antes de importar.');
     const writer = await role('preparador-de-mensagens.md');
     const messageText = await runTask(4, `${writer}\n\nCrie uma mensagem inicial curta e personalizada e um roteiro de conversa para cada lead. Sem alegações não provadas, sem pressão e sem envio. Oferta permitida: landing page e hospedagem por 1 ano por R$297; alterações e hospedagem adicional são cobradas depois. Não inclua preço na primeira mensagem sem motivo. Respeite evidências e sinalize dúvida.\n<LEADS>${JSON.stringify(eligible)}</LEADS>\n<CENTRAL_MESSAGES_JSON>{"leads":[{"name":"","city":"","message":"","salesScript":""}]}</CENTRAL_MESSAGES_JSON>`);
-    const drafts = taggedJson(messageText,'CENTRAL_MESSAGES_JSON');
+    const drafts = eligible.length ? taggedJson(messageText,'CENTRAL_MESSAGES_JSON') : { leads: [] };
     const dmap = new Map((Array.isArray(drafts.leads)?drafts.leads:[]).map(x=>[`${String(x.name||'').toLocaleLowerCase('pt-BR')}|${String(x.city||'').toLocaleLowerCase('pt-BR')}`,x]));
     const scored = eligible.map(x=>{
       const score=30+(x.website==='Não encontrado'?25:0)+(x.maps==='Encontrado'?10:0)+(x.instagramStatus==='Encontrado'?5:0)+(x.phone?10:0)+(Number(x.confidence)>=0.85?10:0);
       const draft=dmap.get(`${x.name.toLocaleLowerCase('pt-BR')}|${x.city.toLocaleLowerCase('pt-BR')}`)||{};
       return {...x,heat:Math.min(score,100),heatRationale:`Sinal de oportunidade baseado em identidade confirmada, presença digital e contato público; não é probabilidade de compra. Confiança ${x.confidence}.`,message:typeof draft.message==='string'?draft.message.trim().slice(0,2000):'',salesScript:typeof draft.salesScript==='string'?draft.salesScript.trim().slice(0,5000):''};
     }).filter(x=>x.message&&x.salesScript);
-    if (!scored.length) throw new Error('Não foi possível gerar mensagem e roteiro válidos. Nenhum lead foi importado.');
-    active().candidates=scored; active().leadCount=scored.length;
+    active().candidates=scored; active().leadCount=candidates.length;
     const allLeads = [...crmLeads];
     const allLeadKeys = new Set(allLeads.map(x => `${String(x.name||'').toLocaleLowerCase('pt-BR')}|${String(x.city||'').toLocaleLowerCase('pt-BR')}`));
     for (const lead of scored) { const key=`${lead.name.toLocaleLowerCase('pt-BR')}|${lead.city.toLocaleLowerCase('pt-BR')}`; if(!allLeadKeys.has(key)){allLeads.push({...lead,stage:'aprovacao'});allLeadKeys.add(key);} }
