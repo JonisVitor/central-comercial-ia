@@ -243,7 +243,9 @@ h3 { margin-bottom: 4px; font-size: 15px; }
 .reply-bubble { max-width: 88%; padding: 12px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
 .reply-bubble.client { justify-self: start; }
 .reply-bubble.operator, .reply-bubble.suggestion { justify-self: end; }
-.reply-bubble.suggestion { border-color: var(--orange-soft); background: var(--surface-2); }
+.reply-bubble.suggestion { border-color: color-mix(in srgb, var(--green) 24%, var(--border)); background: color-mix(in srgb, var(--green) 9%, var(--surface-2)); }
+.reply-bubble.suggestion strong { color: var(--green); font-size: 11px; font-weight: 600; }
+.reply-bubble.suggestion p { line-height: 1.5; }
 .reply-bubble strong { color: var(--text-2); font-size: 11px; }
 .reply-bubble p { margin: 6px 0 0; color: var(--text); font-size: 13px; line-height: 1.55; white-space: normal; overflow-wrap: anywhere; }
 .reply-empty { margin: 0; font-size: 12px; }
