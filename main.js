@@ -400,12 +400,11 @@ function renderAgents() {
 }
 function renderResearchCandidates(run) {
   const rows = run.candidates.map((candidate, index) => {
-    const selectionKey = `${run.id}:${index}`;
     const mapsUrl = safeUrl(candidate.mapsUrl) || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([candidate.name, candidate.city].join(' '))}`;
     const sourceUrl = safeUrl(candidate.sourceUrl);
-    return `<label class="research-candidate"><input type="checkbox" data-research-run="${esc(run.id)}" data-research-candidate="${index}" ${researchSelection.has(selectionKey) ? 'checked' : ''}><span class="research-candidate-main"><strong>${esc(candidate.name)}</strong><small>${esc(candidate.category)} · ${esc(candidate.city)}</small><span>${esc(candidate.evidence)}</span><span class="research-candidate-status">Etapa de entrada: precisa verificar · Fogo inicial: 50/100</span></span><span class="research-candidate-links"><a href="${esc(mapsUrl)}" target="_blank" rel="noopener noreferrer">Abrir Maps ↗</a>${sourceUrl ? `<a href="${esc(sourceUrl)}" target="_blank" rel="noopener noreferrer">Ver fonte ↗</a>` : ''}${candidate.websiteUrl ? `<a href="${esc(safeUrl(candidate.websiteUrl) || '#')}" target="_blank" rel="noopener noreferrer">Site ↗</a>` : ''}</span></label>`;
+    return `<article class="research-candidate"><span class="research-candidate-main"><strong>${esc(candidate.name)}</strong><small>${esc(candidate.category)} · ${esc(candidate.city)}</small><span>${esc(candidate.evidence)}</span><span class="research-candidate-status">Adicionado automaticamente em “Precisa verificar” · Fogo 50/100</span></span><span class="research-candidate-links"><a href="${esc(mapsUrl)}" target="_blank" rel="noopener noreferrer">Abrir Maps ↗</a>${sourceUrl ? `<a href="${esc(sourceUrl)}" target="_blank" rel="noopener noreferrer">Ver fonte ↗</a>` : ''}${candidate.websiteUrl ? `<a href="${esc(safeUrl(candidate.websiteUrl) || '#')}" target="_blank" rel="noopener noreferrer">Site ↗</a>` : ''}</span></article>`;
   }).join('');
-  return `<section class="research-import-panel"><div><h3>Empresas propostas para o painel</h3><p>Confira cada ficha e marque apenas as empresas que reconhece. A importação não envia mensagens; os leads entram como “Precisa verificar”.</p></div><div class="research-candidate-list">${rows}</div><div class="research-import-actions"><span>Empresas duplicadas serão ignoradas.</span><button type="button" class="primary-btn" data-import-research-candidates="${esc(run.id)}" disabled>Importar selecionadas</button></div></section>`;
+  return `<section class="research-import-panel"><div><h3>Empresas adicionadas aos leads</h3><p>Os resultados desta pesquisa foram enviados automaticamente para Prospecção. Duplicados são ignorados; nada foi contatado e nenhuma mensagem foi enviada.</p></div><div class="research-candidate-list">${rows}</div></section>`;
 }
 function renderProjectCard(project) {
   const projectIndex = Math.max(0, PROJECT_STAGES.findIndex(([id]) => id === project.stage));
@@ -490,8 +489,35 @@ function autoImportProspectingRuns() {
   if (!isLocalHost) return;
   const processed = new Set(JSON.parse(localStorage.getItem('central-prospecting-imported-v1') || '[]'));
   const reviewProcessed = new Set(JSON.parse(localStorage.getItem('central-prospecting-review-imported-v1') || '[]'));
+  const savedResearchImports = localStorage.getItem('central-research-auto-imported-v1');
+  const initializeResearchImports = savedResearchImports === null;
+  const researchProcessed = new Set(JSON.parse(savedResearchImports || '[]'));
   let changed = false;
   for (const run of agentRuntime.history || []) {
+    if (run.kind === 'research' && run.state === 'complete' && !initializeResearchImports && !researchProcessed.has(run.id)) {
+      const candidates = Array.isArray(run.candidates) ? run.candidates : [];
+      const known = new Set(state.leads.map(lead => `${importKey(lead.name)}|${importKey(lead.city)}`));
+      let added = 0;
+      for (const item of candidates) {
+        const key = `${importKey(item.name)}|${importKey(item.city)}`;
+        if (!item.name || !item.category || !item.city || (!safeUrl(item.mapsUrl) && !safeUrl(item.sourceUrl)) || known.has(key)) continue;
+        const mapsUrl = safeUrl(item.mapsUrl) || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${item.name} ${item.city}`)}`;
+        state.leads.unshift({
+          id:uid('lead'), name:item.name, category:item.category, city:item.city, phone:item.phone || '',
+          website:item.website === 'Encontrado' ? 'Encontrado' : 'Não verificado', websiteUrl:safeUrl(item.websiteUrl),
+          maps:'Não verificado', mapsUrl, instagramUrl:safeUrl(item.instagramUrl), instagramStatus:'Não verificado',
+          heat:50, heatRationale:'Calor neutro; pesquisa ainda precisa de revisão.', stage:'verificar', evidence:item.evidence || 'Pesquisa pública inicial; conferir a ficha e os canais antes de qualificar.',
+          source:item.source || 'Pesquisa pública assistida pelo Codex', sourceUrl:safeUrl(item.sourceUrl) || mapsUrl,
+          nextAction:'Conferir ficha direta do Maps, site e Instagram antes de qualificar.',
+          notes:'Adicionado automaticamente após pesquisa concluída. Confirme identidade e dados antes de qualquer contato.',
+          responseDue:null, createdAt:isoDate(Date.now()), demo:false
+        });
+        known.add(key);
+        added += 1;
+      }
+      researchProcessed.add(run.id);
+      if (added) { changed = true; toast(`${added} resultado${added === 1 ? '' : 's'} da pesquisa adicionado${added === 1 ? '' : 's'} automaticamente aos leads para revisão. Nenhuma mensagem foi enviada.`); }
+    }
     if (run.kind !== 'prospecting' || run.state !== 'complete') continue;
     const existing = new Set(state.leads.map(lead => `${importKey(lead.name)}|${importKey(lead.city)}`));
     const ready = (run.candidates || []).filter(item => item.name && item.city && item.message && item.salesScript && !existing.has(`${importKey(item.name)}|${importKey(item.city)}`));
@@ -547,6 +573,8 @@ function autoImportProspectingRuns() {
   }
   localStorage.setItem('central-prospecting-imported-v1',JSON.stringify([...processed].slice(-100)));
   localStorage.setItem('central-prospecting-review-imported-v1',JSON.stringify([...reviewProcessed].slice(-100)));
+  if (initializeResearchImports) for (const run of agentRuntime.history || []) if (run.kind === 'research' && run.state === 'complete') researchProcessed.add(run.id);
+  localStorage.setItem('central-research-auto-imported-v1',JSON.stringify([...researchProcessed].slice(-100)));
   if (changed) { state.settings.demo=false; persist(); if(currentPage==='agents'){renderPages();} }
 }
 async function runAgents() {
