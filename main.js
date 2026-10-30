@@ -489,10 +489,10 @@ async function refreshAgentRuntime(shouldRender = true) {
 function autoImportProspectingRuns() {
   if (!isLocalHost) return;
   const processed = new Set(JSON.parse(localStorage.getItem('central-prospecting-imported-v1') || '[]'));
+  const reviewProcessed = new Set(JSON.parse(localStorage.getItem('central-prospecting-review-imported-v1') || '[]'));
   let changed = false;
   for (const run of agentRuntime.history || []) {
-    if (run.kind !== 'prospecting' || run.state !== 'complete' || processed.has(run.id)) continue;
-    processed.add(run.id);
+    if (run.kind !== 'prospecting' || run.state !== 'complete') continue;
     const existing = new Set(state.leads.map(lead => `${importKey(lead.name)}|${importKey(lead.city)}`));
     const ready = (run.candidates || []).filter(item => item.name && item.city && item.message && item.salesScript && !existing.has(`${importKey(item.name)}|${importKey(item.city)}`));
     for (const item of ready) {
@@ -503,8 +503,50 @@ function autoImportProspectingRuns() {
       existing.add(`${importKey(lead.name)}|${importKey(lead.city)}`); changed=true;
     }
     if (ready.length) toast(`${ready.length} lead${ready.length===1?'':'s'} verificado${ready.length===1?'':'s'} adicionado${ready.length===1?'':'s'} com mensagem em aprovação. Nada foi enviado.`);
+    if (!processed.has(run.id)) processed.add(run.id);
+
+    // Leads confirmados na pesquisa/verificação também entram no CRM para revisão,
+    // mesmo quando a qualificação corretamente não autoriza preparar uma mensagem.
+    if (!reviewProcessed.has(run.id)) {
+      const researchTask = (run.tasks || []).find(task => /pesquisador web/i.test(task.name || '') && task.state === 'complete');
+      const verificationTask = (run.tasks || []).find(task => /verifica[cç][aã]o/i.test(task.name || '') && task.state === 'complete');
+      const parseTagged = (result, tag) => {
+        const match = String(result || '').match(new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*</${tag}>`, 'i'));
+        if (!match) return null;
+        try { return JSON.parse(match[1]); } catch { return null; }
+      };
+      const researched = parseTagged(researchTask?.result, 'CENTRAL_LEADS_JSON')?.leads || [];
+      const verified = parseTagged(verificationTask?.result, 'CENTRAL_VERIFICATION_JSON')?.leads || [];
+      const verificationByKey = new Map(verified.map(item => [`${importKey(item.name)}|${importKey(item.city)}`, item]));
+      const reviewLeads = researched.map(item => ({ ...item, ...(verificationByKey.get(`${importKey(item.name)}|${importKey(item.city)}`) || {}) }))
+        .filter(item => item.identityConfirmed === true && Number(item.confidence) >= 0.65 && item.name && item.city && item.category);
+      for (const item of reviewLeads) {
+        const key = `${importKey(item.name)}|${importKey(item.city)}`;
+        if (existing.has(key)) continue;
+        const mapsUrl = safeUrl(item.mapsUrl) || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${item.name} ${item.city}`)}`;
+        const website = ['Encontrado', 'Não encontrado'].includes(item.website) ? item.website : 'Não verificado';
+        const maps = ['Encontrado', 'Não encontrado', 'Cadastro forte', 'Cadastro regular', 'Cadastro incompleto'].includes(item.maps) ? item.maps : 'Não verificado';
+        const instagramStatus = ['Encontrado', 'Não encontrado'].includes(item.instagramStatus) ? item.instagramStatus : 'Não verificado';
+        const researchEvidence = researched.find(source => `${importKey(source.name)}|${importKey(source.city)}` === key)?.evidence;
+        const evidence = [researchEvidence, item.evidence].filter(Boolean).join(' ');
+        state.leads.unshift({
+          id:uid('lead'), name:item.name, category:item.category || 'Não informado', city:item.city,
+          phone:item.phone || '', website, websiteUrl:safeUrl(item.websiteUrl), maps, mapsUrl,
+          instagramUrl:safeUrl(item.instagramUrl), instagramStatus, heat:50, heatRationale:'Calor neutro; ainda não qualificado para contato.',
+          stage:'verificar', evidence, source:'Pesquisa pública assistida pelo Codex', sourceUrl:safeUrl(item.sourceUrl) || mapsUrl,
+          nextAction:'Conferir a ficha direta do Maps, site e Instagram antes de qualificar.',
+          salesScript:'', notes:'Identidade confirmada em fontes públicas. Link do Maps pode ser apenas uma busca; revise ficha, canais e dados antes de qualquer contato.',
+          responseDue:null, createdAt:isoDate(Date.now()), demo:false
+        });
+        existing.add(key);
+        changed = true;
+      }
+      reviewProcessed.add(run.id);
+      if (reviewLeads.length) toast(`${reviewLeads.length} empresas verificadas adicionadas como leads para revisão; sem mensagens e sem contato enviado.`);
+    }
   }
   localStorage.setItem('central-prospecting-imported-v1',JSON.stringify([...processed].slice(-100)));
+  localStorage.setItem('central-prospecting-review-imported-v1',JSON.stringify([...reviewProcessed].slice(-100)));
   if (changed) { state.settings.demo=false; persist(); if(currentPage==='agents'){renderPages();} }
 }
 async function runAgents() {
