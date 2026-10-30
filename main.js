@@ -456,7 +456,7 @@ function bindPageEvents() {
   all('[data-lead-filter]').forEach((button) => button.addEventListener('click', () => { leadFilter = button.dataset.leadFilter; renderPages(); }));
   el('#lead-search')?.addEventListener('input', (event) => { leadSearch = event.target.value; renderPages(); const input = el('#lead-search'); input?.focus(); input?.setSelectionRange(leadSearch.length, leadSearch.length); });
   all('[data-lead-stage]').forEach((select) => select.addEventListener('change', () => updateLeadStage(select.dataset.leadStage, select.value)));
-  all('[data-message-id]').forEach((button) => button.addEventListener('click', () => { currentMessageId = button.dataset.messageId; const message = state.messages.find((item) => item.id === currentMessageId); currentLeadId = message?.leadId; renderPages(); }));
+  all('.message-item[data-message-id]').forEach((button) => button.addEventListener('click', () => { currentMessageId = button.dataset.messageId; const message = state.messages.find((item) => item.id === currentMessageId); currentLeadId = message?.leadId; renderPages(); }));
   all('[data-action="save-message"]').forEach((button) => button.addEventListener('click', () => saveMessage(button.dataset.messageId)));
   all('[data-action="open-whatsapp"]').forEach((button) => button.addEventListener('click', () => openWhatsApp(button.dataset.messageId)));
   all('[data-action="confirm-sent"]').forEach((button) => button.addEventListener('click', () => confirmSent(button.dataset.messageId)));
