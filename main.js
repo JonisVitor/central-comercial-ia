@@ -72,6 +72,7 @@ let agentRuntime = { connected: false, running: false, history: [], roles: [] };
 let selectedRunId = '';
 let assistantOpen = false;
 let assistantBusy = false;
+let customerReplyBusy = false;
 let assistantMessages = loadAssistantMessages();
 const researchSelection = new Set();
 const AGENT_ROLES = [
@@ -427,8 +428,13 @@ function renderMessages() {
   const current = messageByLead(currentLeadId) || state.messages[0];
   if (current) currentMessageId = current.id;
   const lead = current ? leadById(current.leadId) : null;
+  const conversation = current?.conversation || [];
+  const latestSuggestion = [...conversation].reverse().find((item) => item.role === 'sugestao' && item.status !== 'enviada');
+  const conversationLog = conversation.length ? `<div class="reply-history" aria-label="Histórico de respostas">${conversation.map((item) => `<article class="reply-bubble ${item.role === 'cliente' ? 'client' : item.role === 'operador' || item.status === 'enviada' ? 'operator' : 'suggestion'}"><strong>${item.role === 'cliente' ? 'Cliente' : item.role === 'operador' || item.status === 'enviada' ? 'Você · enviada' : 'Sugestão da IA · não enviada'}</strong><p>${esc(item.text).replace(/\n/g, '<br>')}</p></article>`).join('')}</div>` : '<p class="muted reply-empty">As respostas do cliente e os rascunhos sugeridos aparecerão aqui.</p>';
+  const suggestedReply = latestSuggestion ? `<label class="field reply-suggestion-field"><span>Resposta sugerida — revise antes de copiar</span><textarea class="field-textarea" id="customer-reply-suggestion">${esc(latestSuggestion.text)}</textarea></label><div class="message-actions"><button type="button" class="primary-btn" data-action="copy-customer-reply" data-message-id="${current.id}">Copiar resposta</button><button type="button" class="ghost-btn" data-action="mark-reply-sent" data-message-id="${current.id}">Marcar como enviada</button></div>` : '';
+  const replyComposer = `<section class="reply-coach"><div class="reply-coach-heading"><div><h3>O cliente respondeu?</h3><p>Cole aqui a mensagem. A IA considera o histórico e prepara uma resposta para você revisar.</p></div><span class="status-badge ${agentRuntime.connected ? 'green' : 'yellow'}">${agentRuntime.connected ? 'Codex local conectado' : 'Codex local desconectado'}</span></div>${conversationLog}<form id="customer-reply-form"><label class="field" for="customer-reply-input"><span>Resposta recebida</span><textarea class="field-textarea" id="customer-reply-input" name="customerReply" maxlength="5000" placeholder="Cole aqui o que o cliente escreveu…" required></textarea></label><button class="primary-btn" type="submit" ${customerReplyBusy || !agentRuntime.connected ? 'disabled' : ''}>${customerReplyBusy ? 'Analisando conversa…' : 'Analisar e sugerir resposta'}</button></form>${suggestedReply}<p class="modal-note">A IA só prepara o texto. Copie, envie pelo WhatsApp e depois marque como enviada para manter o histórico certo.</p></section>`;
   return `${pageHeader('Conversas sob controle', 'Mensagem pronta não é mensagem enviada.', 'Revise, personalize e só registre o contato depois que você confirmar o envio manual no WhatsApp.', '<button class="primary-btn" data-action="new-lead">+ Preparar contato</button>')}
-    <div class="messages-layout"><div class="message-list"><div class="message-list-head">${state.messages.length} rascunhos registrados</div>${state.messages.map((message) => { const itemLead = leadById(message.leadId); return `<button class="message-item ${message.id === currentMessageId ? 'active' : ''}" data-message-id="${message.id}"><strong>${esc(itemLead?.name || 'Empresa')}</strong><span>${message.sentAt ? '✓ Enviado manualmente' : 'Rascunho aguardando revisão'}</span></button>`; }).join('')}</div><div class="message-editor">${current && lead ? `<div class="panel-header"><div><p class="page-kicker">${messageStateLabel(current)}</p><h2>${esc(lead.name)}</h2><p>${esc(lead.category)} · ${esc(lead.city)}</p></div><span class="heat-badge">♨ ${lead.heat}/100</span></div><div class="message-meta"><span class="tag">Site: ${esc(lead.website)}</span><span class="tag">Maps: ${esc(lead.maps)}</span><span class="tag">Oferta: R$ 297</span></div><label class="field"><span class="muted" style="font-size:12px">Texto sugerido — edite antes de abrir o WhatsApp</span><textarea class="field-textarea" id="message-text">${esc(current.text)}</textarea></label><div class="message-actions"><button class="primary-btn" data-action="save-message" data-message-id="${current.id}">Salvar rascunho</button><button class="ghost-btn" data-action="open-whatsapp" data-message-id="${current.id}">↗ Abrir WhatsApp</button><button class="ghost-btn" data-action="confirm-sent" data-message-id="${current.id}">${current.sentAt ? '✓ Enviado manualmente' : 'Confirmar envio manual'}</button></div><p class="modal-note" style="margin-top:18px">A Central não envia mensagens automaticamente. “Confirmar envio manual” apenas registra que você apertou o botão de enviar fora daqui.</p>` : emptyState('Nenhuma mensagem preparada', 'Cadastre um lead e prepare o primeiro contato.')}</div></div>`;
+    <div class="messages-layout"><div class="message-list"><div class="message-list-head">${state.messages.length} conversas registradas</div>${state.messages.map((message) => { const itemLead = leadById(message.leadId); return `<button class="message-item ${message.id === currentMessageId ? 'active' : ''}" data-message-id="${message.id}"><strong>${esc(itemLead?.name || 'Empresa')}</strong><span>${message.conversation?.length ? `${message.conversation.length} mensagens na conversa` : message.sentAt ? '✓ Enviado manualmente' : 'Rascunho aguardando revisão'}</span></button>`; }).join('')}</div><div class="message-editor">${current && lead ? `<div class="panel-header"><div><p class="page-kicker">${messageStateLabel(current)}</p><h2>${esc(lead.name)}</h2><p>${esc(lead.category)} · ${esc(lead.city)}</p></div><span class="heat-badge">♨ ${lead.heat}/100</span></div><div class="message-meta"><span class="tag">Site: ${esc(lead.website)}</span><span class="tag">Maps: ${esc(lead.maps)}</span></div><label class="field"><span>Mensagem inicial — revise antes de abrir o WhatsApp</span><textarea class="field-textarea" id="message-text">${esc(current.text)}</textarea></label><div class="message-actions"><button class="primary-btn" data-action="save-message" data-message-id="${current.id}">Salvar rascunho</button><button class="ghost-btn" data-action="open-whatsapp" data-message-id="${current.id}">↗ Abrir WhatsApp</button><button class="ghost-btn" data-action="confirm-sent" data-message-id="${current.id}">${current.sentAt ? '✓ Enviado manualmente' : 'Confirmar envio manual'}</button></div><p class="modal-note" style="margin-top:18px">A Central não envia mensagens automaticamente. O envio continua sendo feito por você no WhatsApp.</p>${replyComposer}` : emptyState('Nenhuma mensagem preparada', 'Cadastre um lead e prepare o primeiro contato.')}</div></div>`;
 }
 function messageStateLabel(message) { return message.sentAt ? 'Contato confirmado' : 'Rascunho de mensagem'; }
 
@@ -454,6 +460,9 @@ function bindPageEvents() {
   all('[data-action="save-message"]').forEach((button) => button.addEventListener('click', () => saveMessage(button.dataset.messageId)));
   all('[data-action="open-whatsapp"]').forEach((button) => button.addEventListener('click', () => openWhatsApp(button.dataset.messageId)));
   all('[data-action="confirm-sent"]').forEach((button) => button.addEventListener('click', () => confirmSent(button.dataset.messageId)));
+  el('#customer-reply-form')?.addEventListener('submit', handleCustomerReplySubmit);
+  all('[data-action="copy-customer-reply"]').forEach((button) => button.addEventListener('click', () => copyCustomerReply(button.dataset.messageId)));
+  all('[data-action="mark-reply-sent"]').forEach((button) => button.addEventListener('click', () => markCustomerReplySent(button.dataset.messageId)));
   all('[data-action="export"]').forEach((button) => button.addEventListener('click', exportData));
   all('[data-action="reset"]').forEach((button) => button.addEventListener('click', resetData));
   all('[data-agent-id]').forEach((button) => button.addEventListener('click', () => { selectedAgentId = button.dataset.agentId; renderPages(); }));
@@ -921,6 +930,63 @@ function openProjectDetail(id) {
 
   function saveMessage(id) { const message = state.messages.find((item) => item.id === id); const text = el('#message-text')?.value.trim(); if (!message || !text) return; message.text = text; persist(); toast(isLocalHost ? 'Rascunho salvo no dispositivo.' : 'Rascunho salvo e enviado para sincronização.'); }
 function openWhatsApp(id) { const message = state.messages.find((item) => item.id === id); const lead = message && leadById(message.leadId); const phone = (lead?.phone || '').replace(/\D/g, ''); if (!message || !lead) return; saveMessage(id); const url = phone ? `https://wa.me/55${phone}?text=${encodeURIComponent(message.text)}` : `https://web.whatsapp.com/send?text=${encodeURIComponent(message.text)}`; window.open(url, '_blank', 'noopener'); toast('WhatsApp aberto. Confirme o destinatário e envie manualmente.'); }
+async function handleCustomerReplySubmit(event) {
+  event.preventDefault();
+  if (customerReplyBusy) return;
+  const message = state.messages.find((item) => item.id === currentMessageId);
+  const lead = message && leadById(message.leadId);
+  const customerText = el('#customer-reply-input')?.value.trim();
+  if (!message || !lead || !customerText) return;
+  if (!agentRuntime.connected) { toast('Ligue o executor local do Codex para analisar a resposta.'); return; }
+  customerReplyBusy = true;
+  renderPages();
+  try {
+    const response = await fetch('/api/agent-runtime/customer-reply', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lead: { name: lead.name, category: lead.category, city: lead.city, website: lead.website, websiteUrl: lead.websiteUrl, salesScript: lead.salesScript, evidence: lead.evidence },
+        initialMessage: message.text, initialWasSent: Boolean(message.sentAt), conversation: message.conversation || [], customerReply: customerText
+      })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || 'Não consegui analisar a resposta. Confira se o executor local continua ligado.');
+    message.conversation ||= [];
+    message.conversation.push({ role: 'cliente', text: customerText, createdAt: isoDate(Date.now()) });
+    message.conversation.push({ role: 'sugestao', status: 'rascunho', text: String(payload.reply || '').trim(), createdAt: isoDate(Date.now()) });
+    if (lead.stage === 'contatado') lead.stage = 'respondeu';
+    persist();
+    toast('Sugestão pronta. Revise antes de copiar.');
+  } catch (error) {
+    toast(error.message || 'Não consegui analisar a resposta.');
+  } finally {
+    customerReplyBusy = false;
+    renderPages();
+  }
+}
+async function copyCustomerReply(id) {
+  const message = state.messages.find((item) => item.id === id);
+  const suggestion = [...(message?.conversation || [])].reverse().find((item) => item.role === 'sugestao' && item.status !== 'enviada');
+  const text = el('#customer-reply-suggestion')?.value.trim();
+  if (!suggestion || !text) return;
+  suggestion.text = text;
+  try { await navigator.clipboard.writeText(text); persist(); toast('Resposta copiada. Cole no WhatsApp e envie quando estiver pronto.'); }
+  catch { persist(); el('#customer-reply-suggestion')?.select(); toast('Não consegui copiar automaticamente. O texto ficou selecionado para você copiar.'); }
+}
+function markCustomerReplySent(id) {
+  const message = state.messages.find((item) => item.id === id);
+  const suggestion = [...(message?.conversation || [])].reverse().find((item) => item.role === 'sugestao' && item.status !== 'enviada');
+  const text = el('#customer-reply-suggestion')?.value.trim();
+  if (!message || !suggestion || !text) return;
+  suggestion.text = text;
+  suggestion.role = 'operador';
+  suggestion.status = 'enviada';
+  suggestion.sentAt = isoDate(Date.now());
+  const lead = leadById(message.leadId);
+  if (lead && ['contatado', 'respondeu'].includes(lead.stage)) lead.stage = 'respondeu';
+  persist();
+  renderPages();
+  toast('Resposta registrada como enviada por você.');
+}
 function confirmSent(id) { const message = state.messages.find((item) => item.id === id); if (!message) return; message.sentAt = message.sentAt || isoDate(Date.now()); const lead = leadById(message.leadId); if (lead && ['novo', 'verificar', 'qualificado', 'mensagem', 'aprovacao'].includes(lead.stage)) { lead.stage = 'contatado'; lead.responseDue = lead.responseDue || daysFromNow(7); } persist(); renderPages(); toast('Envio manual registrado. Prazo de resposta iniciado em 7 dias corridos.'); }
 function exportData() { const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `central-comercial-${new Date().toISOString().slice(0, 10)}.json`; anchor.click(); URL.revokeObjectURL(url); toast('Backup JSON exportado.'); }
 function resetData() { if (!confirm('Restaurar os dados de demonstração? Seus registros locais atuais serão substituídos.')) return; state = seedState(); currentLeadId = state.leads[0]?.id; currentMessageId = state.messages[0]?.id; persist(); renderPages(); toast('Dados de demonstração restaurados.'); }

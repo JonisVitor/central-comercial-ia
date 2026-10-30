@@ -232,6 +232,24 @@ h3 { margin-bottom: 4px; font-size: 15px; }
 .message-editor .field-textarea { min-height: 250px; resize: vertical; line-height: 1.6; }
 .message-meta { display: flex; flex-wrap: wrap; gap: 8px; margin: 15px 0 20px; }
 .message-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.reply-coach { display: grid; gap: 16px; margin-top: 28px; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--control); }
+.reply-coach-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.reply-coach-heading h3 { margin: 0; font-size: 17px; }
+.reply-coach-heading p { margin: 7px 0 0; color: var(--text-3); font-size: 13px; line-height: 1.5; }
+.reply-coach form { display: grid; justify-items: start; gap: 12px; }
+.reply-coach form .field { width: 100%; }
+.reply-coach form .field-textarea { min-height: 96px; }
+.reply-history { display: grid; gap: 10px; max-height: 340px; overflow: auto; }
+.reply-bubble { max-width: 88%; padding: 12px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.reply-bubble.client { justify-self: start; }
+.reply-bubble.operator, .reply-bubble.suggestion { justify-self: end; }
+.reply-bubble.suggestion { border-color: var(--orange-soft); background: var(--surface-2); }
+.reply-bubble strong { color: var(--text-2); font-size: 11px; }
+.reply-bubble p { margin: 6px 0 0; color: var(--text); font-size: 13px; line-height: 1.55; white-space: normal; overflow-wrap: anywhere; }
+.reply-empty { margin: 0; font-size: 12px; }
+.reply-suggestion-field { display: block; }
+.reply-suggestion-field > span { display: block; margin-bottom: 7px; color: var(--text-2); font-size: 12px; }
+.reply-suggestion-field .field-textarea { min-height: 110px; line-height: 1.55; }
 .notice { margin-bottom: 16px; padding: 12px 14px; border-left: 3px solid var(--yellow); border-radius: 0 10px 10px 0; color: var(--text-2); background: var(--yellow-soft); font-size: 12px; line-height: 1.45; }
 
 .service-card { max-width: 760px; padding: 22px; }
@@ -481,6 +499,9 @@ h3 { margin-bottom: 4px; font-size: 15px; }
   .message-list-head { display: none; }
   .message-item { min-width: 150px; border-bottom: 0; border-right: 1px solid var(--border); }
   .message-editor { padding: 18px; }
+  .reply-coach { padding: 15px; }
+  .reply-coach-heading { flex-direction: column; }
+  .reply-bubble { max-width: 96%; }
   .form-grid, .detail-grid { grid-template-columns: 1fr; }
   .field.full { grid-column: auto; }
   .modal { padding: 19px; }
