@@ -257,13 +257,14 @@ function handleAssistantDeleteRequest(text) {
   const previousMessages = assistantMessages.slice(0, -1);
   const assistantHistory = previousMessages.filter((item) => item.role === 'assistant');
   const previousAssistant = assistantHistory.at(-1)?.text || '';
+  const followsConfirmedDeletion = /foi excluído do painel|foram excluídos do painel/i.test(previousAssistant);
   const hadFailedNameMatch = assistantHistory.some((item) => /não encontrei um lead|mais de um possível lead|nome mais completo/i.test(item.text || ''));
   const retryAfterSpawnFailure = /spawn eperm/i.test(previousAssistant) && hadFailedNameMatch;
-  const canUseClarification = !actions.length && (/não encontrei um lead|mais de um possível lead|nome mais completo/i.test(previousAssistant) || retryAfterSpawnFailure);
+  const canUseClarification = !actions.length && (/não encontrei um lead|mais de um possível lead|nome mais completo/i.test(previousAssistant) || retryAfterSpawnFailure || followsConfirmedDeletion);
   if (!actions.length && !canUseClarification) return { handled: false };
   const lastAction = actions.at(-1);
   const target = actions.length ? String(text).slice(lastAction.index + lastAction[0].length) : String(text);
-  const ignored = new Set('o a os as um uma uns umas de do da dos das no na nos nas e lead leads cliente clientes empresa empresas registro registros por favor pra para painel lista cadastro prospeccao prospeccão da daqui esse essa isso aquele aquela minha meu quero pode poderia consegue quando pedir eu me mim que chamado chamada aqui'.split(' '));
+  const ignored = new Set('o a os as um uma uns umas de do da dos das no na nos nas e também tambem lead leads cliente clientes empresa empresas registro registros por favor pra para painel lista cadastro prospeccao prospeccão da daqui esse essa isso aquele aquela minha meu quero pode poderia consegue quando pedir eu me mim que chamado chamada aqui'.split(' '));
   const targetTokens = importKey(target).split(' ').filter((token) => token && !ignored.has(token));
   if (!targetTokens.length) return { handled: false };
   const compactTarget = String(target).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
