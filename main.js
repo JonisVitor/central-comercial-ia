@@ -232,14 +232,14 @@ function renderShell() {
 function renderAssistant() {
   const root = el('#assistant-root');
   if (!root) return;
-  const messages = assistantMessages.length ? assistantMessages.map((item) => `<div class="assistant-message ${item.role}"><span>${item.role === 'user' ? 'Você' : 'Assistente'}</span><p>${esc(item.text).replace(/\n/g, '<br>')}</p></div>`).join('') : `<div class="assistant-welcome"><h3>O que vamos fazer?</h3><p>Converse com o Codex, analise os registros importados ou peça uma pesquisa com fontes públicas.</p><button type="button" class="assistant-suggestion" data-assistant-suggestion="Analise meus leads e projetos com os agentes.">Analisar leads e projetos <span>↗</span></button><button type="button" class="assistant-suggestion" data-assistant-suggestion="Pesquise pet shops em São Carlos e traga fontes públicas para eu conferir.">Pesquisar na web com fontes <span>↗</span></button></div>`;
+  const messages = assistantMessages.length ? assistantMessages.map((item) => `<div class="assistant-message ${item.role}"><span>${item.role === 'user' ? 'Você' : 'Assistente'}</span><p>${esc(item.text).replace(/\n/g, '<br>')}</p></div>`).join('') : `<div class="assistant-welcome"><h3>O que vamos fazer?</h3><p>Converse com o Codex, organize os leads ou peça uma pesquisa com fontes públicas.</p><button type="button" class="assistant-suggestion" data-assistant-suggestion="Analise meus leads e projetos com os agentes.">Analisar leads e projetos <span>↗</span></button><button type="button" class="assistant-suggestion" data-assistant-suggestion="Pesquise pet shops em São Carlos e traga fontes públicas para eu conferir.">Pesquisar na web com fontes <span>↗</span></button></div>`;
   root.innerHTML = `<div class="assistant-widget ${assistantOpen ? 'is-open' : ''}">
     ${assistantOpen ? `<section class="assistant-panel" aria-label="Chat com os agentes">
       <header class="assistant-header"><span class="assistant-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0-7.2 13l-.8 4 4-1A8.5 8.5 0 1 0 12 3.5Z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg></span><div><h2>Assistente da Central</h2><p>${agentRuntime.connected ? 'Codex local conectado' : 'Executor local desconectado'}</p></div><button class="assistant-close" type="button" data-assistant-close aria-label="Fechar conversa"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
-      <div class="assistant-scope-notice"><strong>Codex local ${agentRuntime.connected ? 'conectado' : 'desconectado'}.</strong><span>Pedidos de pesquisa usam a busca web do Codex e aparecem na estação Pesquisador web. Análises e pesquisas não alteram o CRM nem enviam mensagens.</span>${agentRuntime.connected ? '' : '<span>Para conectar, inicie <code>npm run agents-runtime</code> no terminal deste computador.</span>'}</div>
+      <div class="assistant-scope-notice"><strong>Codex local ${agentRuntime.connected ? 'conectado' : 'desconectado'}.</strong><span>Pesquisas e análises não alteram o CRM. Para excluir, escreva “excluir [nome do lead]” e confirme na janela. O chat não envia mensagens.</span>${agentRuntime.connected ? '' : '<span>Para conectar a IA, inicie <code>npm run agents-runtime</code>. A exclusão confirmada funciona sem o executor.</span>'}</div>
       <div class="assistant-messages" role="log" aria-live="polite" aria-relevant="additions text">${messages}${assistantBusy ? '<div class="assistant-typing" role="status"><i></i><i></i><i></i><span>Preparando resposta…</span></div>' : ''}</div>
       <form class="assistant-composer" data-assistant-form><label class="sr-only" for="assistant-input">Escreva uma instrução para os agentes</label><textarea id="assistant-input" name="message" rows="1" maxlength="2000" placeholder="Escreva uma mensagem ou /clear para limpar…" ${assistantBusy ? 'disabled' : ''} required></textarea><button type="submit" aria-label="Enviar mensagem" ${assistantBusy ? 'disabled' : ''}><svg viewBox="0 0 24 24"><path d="M4 12 20 4l-5 16-3-7-8-1Z"/><path d="m12 13 8-9"/></svg></button></form>
-      <p class="assistant-foot">Pesquisas usam seu plano Codex. Leads só entram após sua confirmação; o painel não envia mensagens.</p>
+      <p class="assistant-foot">Pesquisas usam seu plano Codex. Exclusões pedem confirmação; o painel não envia mensagens.</p>
     </section>` : ''}
     <button class="assistant-fab" type="button" data-assistant-toggle aria-label="${assistantOpen ? 'Fechar assistente' : 'Abrir chat com agentes'}" aria-expanded="${assistantOpen}">${assistantOpen ? '<svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0-7.2 13l-.8 4 4-1A8.5 8.5 0 1 0 12 3.5Z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg>'}</button>
   </div>`;
@@ -249,6 +249,31 @@ function renderAssistant() {
   root.querySelector('[data-assistant-form]')?.addEventListener('submit', (event) => { event.preventDefault(); sendAssistantMessage(el('#assistant-input')?.value || ''); });
   const log = root.querySelector('.assistant-messages');
   if (log) log.scrollTop = log.scrollHeight;
+}
+
+function handleAssistantDeleteRequest(text) {
+  const actionPattern = /\b(excluir|exclua|exclui|apagar|apague|apaga|remover|remova|remove|deletar|delete|deleta|retirar|retire|tira|tirar)\b/giu;
+  const actions = [...String(text).matchAll(actionPattern)];
+  if (!actions.length) return { handled: false };
+  const lastAction = actions.at(-1);
+  const target = String(text).slice(lastAction.index + lastAction[0].length);
+  const ignored = new Set('o a os as um uma uns umas de do da dos das no na nos nas e lead leads cliente clientes empresa empresas registro registros por favor pra para painel lista cadastro prospeccao prospeccão da daqui esse essa isso aquele aquela minha meu quero pode poderia consegue quando pedir eu me mim que chamado chamada aqui'.split(' '));
+  const targetTokens = importKey(target).split(' ').filter((token) => token && !ignored.has(token));
+  if (!targetTokens.length) return { handled: false };
+  const candidates = state.leads.map((lead) => {
+    const nameTokens = [...new Set(importKey(lead.name).split(' '))];
+    const tokenScore = new Set(targetTokens.filter((token) => nameTokens.includes(token))).size;
+    const compactName = nameTokens.join('');
+    const compactMatch = targetTokens.length === 1 && compactName.includes(targetTokens[0]) ? 1 : 0;
+    const score = Math.max(tokenScore, compactMatch);
+    return { lead, score, required: Math.min(2, nameTokens.length, targetTokens.length) };
+  }).filter((item) => item.score >= item.required).sort((a, b) => b.score - a.score);
+  if (!candidates.length) return { handled: true, reply: `Não encontrei um lead que corresponda a “${target.trim()}”. Confira o nome como aparece na lista; nada foi excluído.` };
+  const topScore = candidates[0].score;
+  const best = candidates.filter((item) => item.score === topScore);
+  if (best.length > 1) return { handled: true, reply: `Encontrei mais de um possível lead: ${best.map((item) => item.lead.name).join('; ')}. Escreva “excluir” seguido do nome mais completo para eu abrir a confirmação. Nada foi apagado.` };
+  const lead = best[0].lead;
+  return { handled: true, leadId: lead.id, reply: `Encontrei “${lead.name}” e abri a confirmação de exclusão. O lead e os projetos e mensagens relacionados só serão removidos se você confirmar.` };
 }
 
 async function sendAssistantMessage(rawText) {
@@ -263,8 +288,17 @@ async function sendAssistantMessage(rawText) {
     return;
   }
   if (!text || assistantBusy) return;
-  if (!agentRuntime.connected) { toast('Conecte o executor local do Codex para conversar com a IA.'); return; }
   assistantMessages.push({ role: 'user', text });
+  const deleteResult = handleAssistantDeleteRequest(text);
+  if (deleteResult.handled) {
+    assistantMessages.push({ role: 'assistant', text: deleteResult.reply });
+    saveAssistantMessages();
+    renderAssistant();
+    if (deleteResult.leadId) openDeleteLeadConfirmation(deleteResult.leadId, true);
+    el('#assistant-input')?.focus();
+    return;
+  }
+  if (!agentRuntime.connected) { assistantMessages.pop(); toast('Conecte o executor local do Codex para conversar com a IA.'); return; }
   assistantBusy = true;
   saveAssistantMessages();
   renderAssistant();
@@ -347,7 +381,7 @@ function renderLeads() {
   });
   const filters = [['ativos', 'Ativos'], ['todos', 'Todos'], ['quentes', '♨ Quentes'], ['novo', 'Novos'], ['contatado', 'Aguardando resposta'], ['respondeu', 'Respondeu'], ['encerrados', 'Encerrados']];
   return `${pageHeader('Prospecção manual assistida', 'Leads com uma razão para conversar.', 'Cadastre empresas encontradas no Google Maps e deixe a evidência visível antes de priorizar o próximo contato.', '<button class="primary-btn" data-action="new-lead">+ Novo lead</button>')}
-    <div class="toolbar"><input class="search-input" id="lead-search" type="search" placeholder="Buscar empresa, nicho ou cidade" value="${esc(leadSearch)}" />${filters.map(([id, label]) => `<button class="filter-btn ${leadFilter === id ? 'active' : ''}" data-lead-filter="${id}">${label}</button>`).join('')}<span class="filter-spacer"></span><input id="lead-json-file" type="file" accept=".json,application/json" hidden /><button class="ghost-btn" data-action="import-leads-json">↑ Importar JSON</button><button class="ghost-btn" data-action="maps-task">⊕ Nova pesquisa Maps</button></div><p class="import-hint">Os dois importadores atualizam o mesmo CRM local. Recusas vão para Encerrados sem apagar o histórico; interesse claro atualiza a etapa ao analisar a resposta do cliente.</p>
+    <div class="toolbar"><input class="search-input" id="lead-search" type="search" placeholder="Buscar empresa, nicho ou cidade" value="${esc(leadSearch)}" />${filters.map(([id, label]) => `<button class="filter-btn ${leadFilter === id ? 'active' : ''}" data-lead-filter="${id}">${label}</button>`).join('')}<span class="filter-spacer"></span><button class="ghost-btn" data-action="import-crm-json">↑ Importar JSON</button><button class="ghost-btn" data-action="maps-task">⊕ Nova pesquisa Maps</button></div><p class="import-hint">Cole um JSON ou selecione um arquivo; o mesmo importador funciona aqui e na aba Agentes. Recusas vão para Encerrados sem apagar o histórico.</p>
     <div class="lead-grid">${filtered.length ? filtered.map(renderLeadCard).join('') : emptyState('Nenhum lead encontrado', 'Ajuste a busca ou cadastre uma nova empresa.')}</div>`;
 }
 function renderLeadCard(lead) {
@@ -386,7 +420,7 @@ function renderAgents() {
   return `<div class="agents-page">
     <header class="agents-page-header">
       <div><h1>Equipe de agentes</h1><p class="lede">Execute os sete agentes internos nos seus leads e projetos. A pesquisa no Maps começa pelo chat e, ao terminar, aciona esses mesmos sete agentes.</p></div>
-      <div class="agents-page-actions"><span class="simulation-badge ${agentRuntime.connected ? 'runtime-online' : ''}"><span class="simulation-dot"></span>${agentRuntime.connected ? 'Codex local conectado' : 'Executor local desconectado'}</span><button class="ghost-btn" type="button" data-agent-import>Importar JSON</button><input id="agent-data-file" type="file" accept=".json,application/json" hidden /><button class="primary-btn" type="button" data-agent-run ${!agentRuntime.connected || agentRuntime.running || (!realLeadCount && !realProjectCount) ? 'disabled' : ''}>${agentRuntime.running ? '⟳ Agentes trabalhando…' : '▶ Executar agentes'}</button></div>
+    <div class="agents-page-actions"><span class="simulation-badge ${agentRuntime.connected ? 'runtime-online' : ''}"><span class="simulation-dot"></span>${agentRuntime.connected ? 'Codex local conectado' : 'Executor local desconectado'}</span><button class="ghost-btn" type="button" data-action="import-crm-json">Importar JSON</button><button class="primary-btn" type="button" data-agent-run ${!agentRuntime.connected || agentRuntime.running || (!realLeadCount && !realProjectCount) ? 'disabled' : ''}>${agentRuntime.running ? '⟳ Agentes trabalhando…' : '▶ Executar agentes'}</button></div>
     </header>
       <p class="agent-demo-notice" role="note"><strong>Dois modos de execução.</strong> Este botão roda os sete agentes internos e não faz pesquisa no Maps. Para buscar empresas, peça no chat algo como “15 lanchonetes em São Carlos”; o Pesquisador web roda primeiro e depois os sete agentes. Leads aprovados entram no painel aguardando sua revisão. Mensagens e LPs continuam sob seu controle. Cada execução consome o limite do plano Codex. Importar JSON aqui atualiza o mesmo CRM usado em Prospecção.</p>
     <div class="agent-status-strip" aria-label="Estados atuais dos agentes">
@@ -482,8 +516,7 @@ function bindPageEvents() {
   all('[data-page]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.page)));
   all('[data-action="new-lead"]').forEach((button) => button.addEventListener('click', openLeadModal));
   all('[data-action="new-project"]').forEach((button) => button.addEventListener('click', openProjectModal));
-  all('[data-action="import-leads-json"]').forEach((button) => button.addEventListener('click', () => el('#lead-json-file')?.click()));
-  el('#lead-json-file')?.addEventListener('change', importLeadsJsonFile);
+  all('[data-action="import-crm-json"]').forEach((button) => button.addEventListener('click', openCRMJsonImportModal));
   all('[data-action="maps-task"]').forEach((button) => button.addEventListener('click', () => { assistantOpen = true; renderAssistant(); const input = el('#assistant-input'); if (input) { input.value = 'Pesquise empresas no Google Maps: [nicho] em [cidade, estado]. Traga candidatos com links e evidências para eu revisar.'; input.focus(); input.setSelectionRange(input.value.indexOf('['), input.value.lastIndexOf(']') + 1); } }));
   all('[data-lead-id]').forEach((button) => button.addEventListener('click', (event) => { if (event.target.closest('select')) return; openLeadDetail(button.dataset.leadId); }));
   all('[data-project-id]').forEach((button) => button.addEventListener('click', () => openProjectDetail(button.dataset.projectId)));
@@ -509,8 +542,6 @@ function bindPageEvents() {
   }));
   all('[data-import-research-candidates]').forEach((button) => button.addEventListener('click', () => importResearchCandidates(button.dataset.importResearchCandidates)));
   el('[data-agent-run]')?.addEventListener('click', runAgents);
-  el('[data-agent-import]')?.addEventListener('click', () => el('#agent-data-file')?.click());
-  el('#agent-data-file')?.addEventListener('change', importAgentDataset);
 }
 async function refreshAgentRuntime(shouldRender = true) {
   const wasConnected = agentRuntime.connected;
@@ -659,14 +690,25 @@ function closeModal() { el('#modal-root').innerHTML = ''; }
 function openLeadModal() { modal(`<div class="modal-header"><div><p class="page-kicker">Novo registro</p><h2>Cadastrar lead</h2><p>A empresa pode ter vindo de uma consulta manual no Google Maps.</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><form id="lead-form"><div class="form-grid"><label class="field"><span>Nome da empresa *</span><input class="field-input" name="name" required placeholder="Ex.: Studio Aquarela" /></label><label class="field"><span>Nicho *</span><input class="field-input" name="category" required placeholder="Ex.: manicure e salão" /></label><label class="field"><span>Cidade / região *</span><input class="field-input" name="city" required placeholder="Ex.: São Carlos, SP" /></label><label class="field"><span>Telefone / WhatsApp com DDD</span><input class="field-input" name="phone" inputmode="tel" autocomplete="tel" placeholder="Ex.: (16) 99999-9999" /></label><label class="field"><span>Site identificado</span><select class="field-select" name="website"><option>Não verificado</option><option>Não encontrado</option><option>Encontrado</option></select></label><label class="field"><span>Cadastro no Maps</span><select class="field-select" name="maps"><option>Não verificado</option><option>Não encontrado</option><option>Cadastro incompleto</option><option>Cadastro regular</option><option>Cadastro forte</option></select></label><label class="field full"><span>Calor inicial do lead</span><span class="range-wrap"><input class="heat-range" type="range" name="heat" min="0" max="100" value="50" /><strong class="range-value" id="modal-heat-value">50/100</strong></span></label><label class="field full"><span>Evidência observável</span><textarea class="field-textarea" name="evidence" required placeholder="O que foi observado no site, Maps ou presença digital?"></textarea></label><label class="field full"><span>Próxima ação / notas</span><textarea class="field-textarea" name="notes" placeholder="Ex.: confirmar se atende por agendamento."></textarea></label></div><div class="modal-actions"><button type="button" class="ghost-btn" data-modal-close>Cancelar</button><button class="primary-btn" type="submit">Salvar lead</button></div></form>`); el('#lead-form').addEventListener('submit', saveLead); el('.heat-range').addEventListener('input', (event) => { el('#modal-heat-value').textContent = `${event.target.value}/100`; }); }
 function saveLead(event) { event.preventDefault(); const form = new FormData(event.target); const lead = { id: uid('lead'), name: form.get('name'), category: form.get('category'), city: form.get('city'), phone: form.get('phone'), website: form.get('website'), websiteUrl: '', maps: form.get('maps'), mapsUrl: '', instagramUrl: '', instagramStatus: 'Não verificado', heat: Number(form.get('heat')), stage: 'novo', evidence: form.get('evidence'), source: 'Google Maps · consulta manual', notes: form.get('notes'), nextAction: 'Verificar e qualificar', responseDue: null, createdAt: isoDate(Date.now()), demo: false }; state.leads.unshift(lead); state.messages.unshift({ id: uid('message'), leadId: lead.id, text: initialWhatsAppMessage(lead), sentAt: null }); state.settings.demo = false; persist(); currentLeadId = lead.id; closeModal(); toast('Lead cadastrado e mensagem inicial preparada.'); renderPages(); }
 function importKey(value) { return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
+function openCRMJsonImportModal() {
+  modal(`<div class="modal-header"><div><p class="page-kicker">Importação em lote</p><h2>Colar ou escolher JSON</h2><p>Os leads serão acrescentados ao mesmo CRM, tanto pela Prospecção quanto pela aba Agentes.</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><label class="field json-paste-field"><span>Cole o conteúdo do JSON</span><textarea class="field-textarea json-paste-area" id="crm-json-paste" placeholder='Cole aqui um array de empresas ou um objeto com "leads": [...]' spellcheck="false"></textarea></label><div class="json-import-actions"><button class="primary-btn" type="button" data-action="import-pasted-json">Importar conteúdo colado</button><label class="ghost-btn json-file-button">Escolher arquivo .json<input id="crm-json-file" type="file" accept=".json,application/json" /></label></div><p class="modal-note">Aceita de 1 a 250 leads. Registros com o mesmo nome e cidade são ignorados como duplicados.</p>`);
+  el('[data-action="import-pasted-json"]')?.addEventListener('click', importPastedCRMJson);
+  el('#crm-json-file')?.addEventListener('change', importCRMJsonFile);
+}
+function importPastedCRMJson() {
+  const text = el('#crm-json-paste')?.value.trim();
+  if (!text) { toast('Cole o conteúdo do JSON antes de importar.'); return; }
+  if (new Blob([text]).size > 2_000_000) { toast('O JSON ultrapassa o limite de 2 MB.'); return; }
+  importCRMJsonFile(new File([text], 'leads-import.json', { type: 'application/json' }));
+}
 async function importLeadsJsonFile(event) {
   return importCRMJsonFile(event);
 }
 async function importCRMJsonFile(event) {
-  const input = event.currentTarget;
-  const file = input.files?.[0];
+  const input = event?.currentTarget;
+  const file = typeof File !== 'undefined' && event instanceof File ? event : input?.files?.[0];
   if (!file) return;
-  input.value = '';
+  if (input) input.value = '';
   if (file.size > 2_000_000) { toast('O JSON ultrapassa o limite de 2 MB.'); return; }
   try {
     const payload = JSON.parse(await file.text());
@@ -747,6 +789,7 @@ async function importCRMJsonFile(event) {
       renderPages();
     }
     const summary = [`${added.length} lead${added.length === 1 ? '' : 's'} adicionado${added.length === 1 ? '' : 's'}`, `${addedProjects} projeto${addedProjects === 1 ? '' : 's'} adicionado${addedProjects === 1 ? '' : 's'}`, `${duplicates} duplicado${duplicates === 1 ? '' : 's'} ignorado${duplicates === 1 ? '' : 's'}`, invalid ? `${invalid} inválido${invalid === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ');
+    closeModal();
     toast(summary);
   } catch (error) {
     toast(error instanceof SyntaxError ? 'Não consegui ler o JSON. Confira a sintaxe e tente novamente.' : error.message || 'Não foi possível importar este arquivo.');
@@ -896,7 +939,7 @@ function saveLeadDetails(event) {
   renderPages();
   toast(isLocalHost ? 'Ficha atualizada neste dispositivo.' : 'Ficha atualizada e enviada para sincronização.');
 }
-function openDeleteLeadConfirmation(id) { const lead = leadById(id); if (!lead) return; modal(`<div class="modal-header"><div><p class="page-kicker">Confirmação necessária</p><h2>Excluir ${esc(lead.name)}?</h2><p>Esta ação remove o cliente e os registros relacionados.</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><div class="delete-warning"><strong>Serão removidos:</strong><span>este lead, seus projetos e rascunhos de mensagem.</span></div><div class="modal-actions"><button class="ghost-btn" data-modal-close>Cancelar</button><button class="danger-btn" data-confirm-delete-lead="${esc(lead.id)}">Confirmar exclusão</button></div>`); el('[data-confirm-delete-lead]')?.addEventListener('click', () => deleteLead(id)); }
+function openDeleteLeadConfirmation(id, fromAssistant = false) { const lead = leadById(id); if (!lead) return; modal(`<div class="modal-header"><div><p class="page-kicker">Confirmação necessária</p><h2>Excluir ${esc(lead.name)}?</h2><p>Esta ação remove o cliente e os registros relacionados.</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><div class="delete-warning"><strong>Serão removidos:</strong><span>este lead, seus projetos e mensagens.</span></div><div class="modal-actions"><button class="ghost-btn" ${fromAssistant ? 'data-assistant-delete-cancel' : 'data-modal-close'}>Cancelar</button><button class="danger-btn" data-confirm-delete-lead="${esc(lead.id)}">Confirmar exclusão</button></div>`); el('[data-confirm-delete-lead]')?.addEventListener('click', () => { if (fromAssistant) { assistantMessages.push({ role: 'assistant', text: `O lead “${lead.name}” foi excluído do painel, junto com os registros relacionados.` }); saveAssistantMessages(); } deleteLead(id); if (fromAssistant) renderAssistant(); }); if (fromAssistant) el('[data-assistant-delete-cancel]')?.addEventListener('click', () => { closeModal(); assistantMessages.push({ role: 'assistant', text: `Exclusão cancelada. “${lead.name}” continua no painel.` }); saveAssistantMessages(); renderAssistant(); }); }
 function deleteLead(id) { const lead = leadById(id); if (!lead) return; const name = lead.name.trim().toLocaleLowerCase('pt-BR'); state.leads = state.leads.filter((item) => item.id !== id); state.projects = state.projects.filter((item) => item.leadId !== id && String(item.name || '').trim().toLocaleLowerCase('pt-BR') !== name); state.messages = state.messages.filter((item) => item.leadId !== id); if (currentLeadId === id) currentLeadId = null; if (currentMessageId && !state.messages.some((item) => item.id === currentMessageId)) currentMessageId = null; persist(); closeModal(); renderPages(); toast(`${lead.name} e os registros relacionados foram excluídos.`); }
 function updateLeadStage(id, stage) { const lead = leadById(id); if (!lead) return; lead.stage = stage; if (['respondeu', 'interessado', 'ganho', 'perdido', 'nao-contatar'].includes(stage)) lead.responseDue = null; if (stage === 'contatado' && !lead.responseDue) lead.responseDue = daysFromNow(7); persist(); renderPages(); toast(`Etapa atualizada: ${stageLabel(stage)}.`); }
 
