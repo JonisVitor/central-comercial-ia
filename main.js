@@ -606,11 +606,7 @@ function navigate(page) { currentPage = page; renderShell(); renderPages(); wind
 function toggleTheme() { state.settings.theme = state.settings.theme === 'light' ? 'dark' : 'light'; persist(); applyTheme(); renderShell(); renderPages(); toast(state.settings.theme === 'light' ? 'Modo claro ativado.' : 'Modo escuro ativado.'); }
 
 function initialWhatsAppMessage(lead) {
-  const category = String(lead.category || '').trim();
-  const city = String(lead.city || '').split(',')[0].trim();
-  const context = [category, city].filter(Boolean).join(' em ');
-  const intro = context ? `Estou conhecendo melhor ${context} e encontrei a ${lead.name}.` : `Encontrei a ${lead.name} e queria conhecer melhor o trabalho de vocês.`;
-  return `Oi! Tudo bem? ${intro} Qual produto ou serviço vocês mais gostam de apresentar para quem ainda não conhece a empresa?`;
+  return `Oi, tudo bem? Gostaria de conhecer melhor a ${String(lead.name || 'empresa').trim()}. Quais serviços ou produtos vocês oferecem? Vocês têm algum site onde eu possa ver mais informações?`;
 }
 
 function modal(content, className = '') { el('#modal-root').innerHTML = `<div class="modal-backdrop open" data-close-modal><div class="modal ${className}" role="dialog" aria-modal="true">${content}</div></div>`; el('[data-close-modal]')?.addEventListener('click', (event) => { if (event.target === event.currentTarget) closeModal(); }); el('[data-modal-close]')?.addEventListener('click', closeModal); }
