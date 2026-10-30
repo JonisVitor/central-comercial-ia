@@ -1,4 +1,4 @@
-const CACHE = 'central-comercial-v11';
+const CACHE = 'central-comercial-v12';
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
