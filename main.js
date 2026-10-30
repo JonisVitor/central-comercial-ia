@@ -622,7 +622,7 @@ function initialWhatsAppMessage(lead) {
 
 function modal(content, className = '') { el('#modal-root').innerHTML = `<div class="modal-backdrop open" data-close-modal><div class="modal ${className}" role="dialog" aria-modal="true">${content}</div></div>`; el('[data-close-modal]')?.addEventListener('click', (event) => { if (event.target === event.currentTarget) closeModal(); }); el('[data-modal-close]')?.addEventListener('click', closeModal); }
 function closeModal() { el('#modal-root').innerHTML = ''; }
-function openLeadModal() { modal(`<div class="modal-header"><div><p class="page-kicker">Novo registro</p><h2>Cadastrar lead</h2><p>A empresa pode ter vindo de uma consulta manual no Google Maps.</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><form id="lead-form"><div class="form-grid"><label class="field"><span>Nome da empresa *</span><input class="field-input" name="name" required placeholder="Ex.: Studio Aquarela" /></label><label class="field"><span>Nicho *</span><input class="field-input" name="category" required placeholder="Ex.: manicure e salão" /></label><label class="field"><span>Cidade / região *</span><input class="field-input" name="city" required placeholder="Ex.: São Carlos, SP" /></label><label class="field"><span>Contato comercial</span><input class="field-input" name="phone" placeholder="Telefone ou WhatsApp público" /></label><label class="field"><span>Site identificado</span><select class="field-select" name="website"><option>Não verificado</option><option>Não encontrado</option><option>Encontrado</option></select></label><label class="field"><span>Cadastro no Maps</span><select class="field-select" name="maps"><option>Não verificado</option><option>Não encontrado</option><option>Cadastro incompleto</option><option>Cadastro regular</option><option>Cadastro forte</option></select></label><label class="field full"><span>Calor inicial do lead</span><span class="range-wrap"><input class="heat-range" type="range" name="heat" min="0" max="100" value="50" /><strong class="range-value" id="modal-heat-value">50/100</strong></span></label><label class="field full"><span>Evidência observável</span><textarea class="field-textarea" name="evidence" required placeholder="O que foi observado no site, Maps ou presença digital?"></textarea></label><label class="field full"><span>Próxima ação / notas</span><textarea class="field-textarea" name="notes" placeholder="Ex.: confirmar se atende por agendamento."></textarea></label></div><div class="modal-actions"><button type="button" class="ghost-btn" data-modal-close>Cancelar</button><button class="primary-btn" type="submit">Salvar lead</button></div></form>`); el('#lead-form').addEventListener('submit', saveLead); el('.heat-range').addEventListener('input', (event) => { el('#modal-heat-value').textContent = `${event.target.value}/100`; }); }
+function openLeadModal() { modal(`<div class="modal-header"><div><p class="page-kicker">Novo registro</p><h2>Cadastrar lead</h2><p>A empresa pode ter vindo de uma consulta manual no Google Maps.</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><form id="lead-form"><div class="form-grid"><label class="field"><span>Nome da empresa *</span><input class="field-input" name="name" required placeholder="Ex.: Studio Aquarela" /></label><label class="field"><span>Nicho *</span><input class="field-input" name="category" required placeholder="Ex.: manicure e salão" /></label><label class="field"><span>Cidade / região *</span><input class="field-input" name="city" required placeholder="Ex.: São Carlos, SP" /></label><label class="field"><span>Telefone / WhatsApp com DDD</span><input class="field-input" name="phone" inputmode="tel" autocomplete="tel" placeholder="Ex.: (16) 99999-9999" /></label><label class="field"><span>Site identificado</span><select class="field-select" name="website"><option>Não verificado</option><option>Não encontrado</option><option>Encontrado</option></select></label><label class="field"><span>Cadastro no Maps</span><select class="field-select" name="maps"><option>Não verificado</option><option>Não encontrado</option><option>Cadastro incompleto</option><option>Cadastro regular</option><option>Cadastro forte</option></select></label><label class="field full"><span>Calor inicial do lead</span><span class="range-wrap"><input class="heat-range" type="range" name="heat" min="0" max="100" value="50" /><strong class="range-value" id="modal-heat-value">50/100</strong></span></label><label class="field full"><span>Evidência observável</span><textarea class="field-textarea" name="evidence" required placeholder="O que foi observado no site, Maps ou presença digital?"></textarea></label><label class="field full"><span>Próxima ação / notas</span><textarea class="field-textarea" name="notes" placeholder="Ex.: confirmar se atende por agendamento."></textarea></label></div><div class="modal-actions"><button type="button" class="ghost-btn" data-modal-close>Cancelar</button><button class="primary-btn" type="submit">Salvar lead</button></div></form>`); el('#lead-form').addEventListener('submit', saveLead); el('.heat-range').addEventListener('input', (event) => { el('#modal-heat-value').textContent = `${event.target.value}/100`; }); }
 function saveLead(event) { event.preventDefault(); const form = new FormData(event.target); const lead = { id: uid('lead'), name: form.get('name'), category: form.get('category'), city: form.get('city'), phone: form.get('phone'), website: form.get('website'), websiteUrl: '', maps: form.get('maps'), mapsUrl: '', instagramUrl: '', instagramStatus: 'Não verificado', heat: Number(form.get('heat')), stage: 'novo', evidence: form.get('evidence'), source: 'Google Maps · consulta manual', notes: form.get('notes'), nextAction: 'Verificar e qualificar', responseDue: null, createdAt: isoDate(Date.now()), demo: false }; state.leads.unshift(lead); state.messages.unshift({ id: uid('message'), leadId: lead.id, text: initialWhatsAppMessage(lead), sentAt: null }); state.settings.demo = false; persist(); currentLeadId = lead.id; closeModal(); toast('Lead cadastrado e mensagem inicial preparada.'); renderPages(); }
 function importKey(value) { return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
 async function importLeadsJsonFile(event) {
@@ -736,7 +736,7 @@ function openLeadDetail(id) {
       <label class="field"><span>Nome da empresa</span><input class="field-input" name="name" required value="${esc(lead.name)}" /></label>
       <label class="field"><span>Nicho / categoria</span><input class="field-input" name="category" value="${esc(lead.category)}" /></label>
       <label class="field"><span>Cidade / região</span><input class="field-input" name="city" value="${esc(lead.city)}" /></label>
-      <label class="field"><span>Telefone / WhatsApp</span><input class="field-input" name="phone" value="${esc(lead.phone)}" /></label>
+      <label class="field"><span>Telefone / WhatsApp com DDD</span><input class="field-input" name="phone" inputmode="tel" autocomplete="tel" placeholder="(16) 99999-9999" value="${esc(lead.phone)}" /><small class="field-help">Necessário para abrir a conversa direta no WhatsApp.</small></label>
       <label class="field"><span>Etapa comercial</span><select class="field-select" name="stage">${LEAD_STAGES.map(([stage, label]) => `<option value="${stage}" ${stage === lead.stage ? 'selected' : ''}>${label}</option>`).join('')}</select><small class="field-help">“Venda fechada” significa que contratou. “Encerrado sem venda” significa que a oportunidade terminou sem contratação.</small></label>
       <label class="field"><span>Prazo para resposta</span><input class="field-input" name="responseDue" type="datetime-local" value="${esc(dueValue)}" /></label>
       <label class="field full"><span>Calor do lead · ${lead.heat}/100</span><span class="range-wrap"><input class="heat-range" type="range" name="heat" min="0" max="100" value="${Number(lead.heat) || 0}" /><strong class="range-value" id="edit-heat-value">${Number(lead.heat) || 0}/100</strong></span></label>
@@ -929,7 +929,32 @@ function openProjectDetail(id) {
 }
 
   function saveMessage(id) { const message = state.messages.find((item) => item.id === id); const text = el('#message-text')?.value.trim(); if (!message || !text) return; message.text = text; persist(); toast(isLocalHost ? 'Rascunho salvo no dispositivo.' : 'Rascunho salvo e enviado para sincronização.'); }
-function openWhatsApp(id) { const message = state.messages.find((item) => item.id === id); const lead = message && leadById(message.leadId); const phone = (lead?.phone || '').replace(/\D/g, ''); if (!message || !lead) return; saveMessage(id); const url = phone ? `https://wa.me/55${phone}?text=${encodeURIComponent(message.text)}` : `https://web.whatsapp.com/send?text=${encodeURIComponent(message.text)}`; window.open(url, '_blank', 'noopener'); toast('WhatsApp aberto. Confirme o destinatário e envie manualmente.'); }
+function normalizeBrazilianWhatsApp(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (/^55\d{10,11}$/.test(digits)) return digits;
+  if (/^\d{10,11}$/.test(digits)) return `55${digits}`;
+  return '';
+}
+function openWhatsApp(id) {
+  const message = state.messages.find((item) => item.id === id);
+  const lead = message && leadById(message.leadId);
+  if (!message || !lead) return;
+  const phone = normalizeBrazilianWhatsApp(lead.phone);
+  if (!phone) {
+    openLeadDetail(lead.id);
+    requestAnimationFrame(() => {
+      const phoneField = el('#edit-lead-form [name="phone"]');
+      phoneField?.focus();
+      phoneField?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    toast(lead.phone ? 'Confira o telefone: informe um número brasileiro com DDD.' : 'Cadastre o telefone/WhatsApp com DDD para abrir a conversa direta.');
+    return;
+  }
+  saveMessage(id);
+  const url = `https://wa.me/${phone}?text=${encodeURIComponent(message.text)}`;
+  window.open(url, '_blank', 'noopener');
+  toast('Conversa do cliente aberta no WhatsApp. Confira o contato e envie manualmente.');
+}
 async function handleCustomerReplySubmit(event) {
   event.preventDefault();
   if (customerReplyBusy) return;
