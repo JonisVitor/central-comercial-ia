@@ -9,6 +9,7 @@ const LEAD_STAGES = [
   ['respondeu', 'Respondeu'], ['interessado', 'Interessado'], ['proposta', 'Proposta enviada'],
   ['negociacao', 'Negociação'], ['ganho', 'Venda fechada'], ['perdido', 'Encerrado sem venda'], ['nao-contatar', 'Não contatar']
 ];
+const CLOSED_LEAD_STAGES = ['ganho', 'perdido', 'nao-contatar'];
 const PROJECT_STAGES = [
   ['confirmado', 'Venda confirmada'], ['materiais', 'Aguardando materiais'], ['producao', 'Em produção'],
   ['revisao', 'Revisão do cliente'], ['ajustes', 'Ajustes adicionais'], ['hospedagem', 'Hospedagem configurada'],
@@ -64,7 +65,7 @@ let state = loadState();
 let currentPage = 'overview';
 let currentLeadId = state.leads[0]?.id;
 let currentMessageId = state.messages[0]?.id;
-let leadFilter = 'todos';
+let leadFilter = 'ativos';
 let leadSearch = '';
 let remoteHydrated = false;
 let syncTimer;
@@ -309,15 +310,16 @@ function renderPages() {
 }
 
 function renderOverview() {
-  const hot = state.leads.filter((lead) => lead.heat >= 70).length;
-  const waiting = state.leads.filter((lead) => ['contatado', 'aprovacao'].includes(lead.stage)).length;
+  const activeLeads = state.leads.filter((lead) => !CLOSED_LEAD_STAGES.includes(lead.stage));
+  const hot = activeLeads.filter((lead) => lead.heat >= 70).length;
+  const waiting = activeLeads.filter((lead) => ['contatado', 'aprovacao'].includes(lead.stage)).length;
   const activeProjects = state.projects.filter((project) => !['entregue', 'ativo'].includes(project.stage)).length;
-  const priorityLeads = [...state.leads].sort((a, b) => b.heat - a.heat).slice(0, 4);
+  const priorityLeads = [...activeLeads].sort((a, b) => b.heat - a.heat).slice(0, 4);
   const deadlines = [...state.projects].filter((project) => !['entregue', 'ativo'].includes(project.stage)).sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0, 4);
-  const counts = LEAD_STAGES.slice(0, 7).map(([id, label]) => ({ id, label, count: state.leads.filter((lead) => lead.stage === id).length }));
+  const counts = LEAD_STAGES.slice(0, 8).map(([id, label]) => ({ id, label, count: state.leads.filter((lead) => lead.stage === id).length }));
   return `${pageHeader('Painel de operação', 'O próximo contato está aqui.', 'Priorize os leads mais quentes, acompanhe respostas e não deixe um prazo passar despercebido.', '<button class="primary-btn" data-action="new-lead">+ Cadastrar lead</button>')}
     <div class="metric-grid">
-      ${metricCard('Leads no radar', state.leads.length, 'empresas cadastradas', '◎')}
+      ${metricCard('Leads no radar', activeLeads.length, 'em prospecção ativa', '◎')}
       ${metricCard('Leads quentes', hot, 'calor acima de 70', '♨')}
       ${metricCard('Aguardando ação', waiting, 'resposta ou aprovação', '◷')}
       ${metricCard('Projetos ativos', activeProjects, 'com prazo em andamento', '▱')}
@@ -334,10 +336,18 @@ function renderDeadlineRow(project) { const count = countdown(project.dueDate); 
 function emptyState(title, body) { return `<div class="empty-state"><strong>${title}</strong>${body}</div>`; }
 
 function renderLeads() {
-  const filtered = state.leads.filter((lead) => `${lead.name} ${lead.category} ${lead.city}`.toLowerCase().includes(leadSearch.toLowerCase()) && (leadFilter === 'todos' || lead.stage === leadFilter));
-  const filters = [['todos', 'Todos'], ['quentes', '♨ Quentes'], ['novo', 'Novos'], ['contatado', 'Aguardando'], ['respondeu', 'Respondeu']];
+  const filtered = state.leads.filter((lead) => {
+    const matchesSearch = `${lead.name} ${lead.category} ${lead.city}`.toLowerCase().includes(leadSearch.toLowerCase());
+    const matchesFilter = leadFilter === 'ativos' ? !CLOSED_LEAD_STAGES.includes(lead.stage)
+      : leadFilter === 'encerrados' ? CLOSED_LEAD_STAGES.includes(lead.stage)
+        : leadFilter === 'todos' ? true
+          : leadFilter === 'quentes' ? Number(lead.heat) >= 70
+            : lead.stage === leadFilter;
+    return matchesSearch && matchesFilter;
+  });
+  const filters = [['ativos', 'Ativos'], ['todos', 'Todos'], ['quentes', '♨ Quentes'], ['novo', 'Novos'], ['contatado', 'Aguardando resposta'], ['respondeu', 'Respondeu'], ['encerrados', 'Encerrados']];
   return `${pageHeader('Prospecção manual assistida', 'Leads com uma razão para conversar.', 'Cadastre empresas encontradas no Google Maps e deixe a evidência visível antes de priorizar o próximo contato.', '<button class="primary-btn" data-action="new-lead">+ Novo lead</button>')}
-    <div class="toolbar"><input class="search-input" id="lead-search" type="search" placeholder="Buscar empresa, nicho ou cidade" value="${esc(leadSearch)}" />${filters.map(([id, label]) => `<button class="filter-btn ${leadFilter === id ? 'active' : ''}" data-lead-filter="${id}">${label}</button>`).join('')}<span class="filter-spacer"></span><input id="lead-json-file" type="file" accept=".json,application/json" hidden /><button class="ghost-btn" data-action="import-leads-json">↑ Importar JSON</button><button class="ghost-btn" data-action="maps-task">⊕ Nova pesquisa Maps</button></div><p class="import-hint">Os dois importadores aceitam a lista <code>leads</code> ou o backup completo da Central. Leads, mensagens e projetos entram neste mesmo CRM local; duplicados são ignorados.</p>
+    <div class="toolbar"><input class="search-input" id="lead-search" type="search" placeholder="Buscar empresa, nicho ou cidade" value="${esc(leadSearch)}" />${filters.map(([id, label]) => `<button class="filter-btn ${leadFilter === id ? 'active' : ''}" data-lead-filter="${id}">${label}</button>`).join('')}<span class="filter-spacer"></span><input id="lead-json-file" type="file" accept=".json,application/json" hidden /><button class="ghost-btn" data-action="import-leads-json">↑ Importar JSON</button><button class="ghost-btn" data-action="maps-task">⊕ Nova pesquisa Maps</button></div><p class="import-hint">Os dois importadores atualizam o mesmo CRM local. Recusas vão para Encerrados sem apagar o histórico; interesse claro atualiza a etapa ao analisar a resposta do cliente.</p>
     <div class="lead-grid">${filtered.length ? filtered.map(renderLeadCard).join('') : emptyState('Nenhum lead encontrado', 'Ajuste a busca ou cadastre uma nova empresa.')}</div>`;
 }
 function renderLeadCard(lead) {
@@ -345,7 +355,7 @@ function renderLeadCard(lead) {
   const websiteTag = lead.website === 'Não encontrado' ? ['red', 'Site não encontrado'] : lead.website === 'Não verificado' ? ['yellow', 'Site a verificar'] : ['green', 'Site identificado'];
   const mapsLabel = lead.maps === 'Não verificado' ? 'a verificar' : lead.maps === 'Não encontrado' ? 'não encontrado' : lead.maps.replace('Cadastro ', '');
   const mapsTone = lead.maps === 'Não encontrado' ? 'red' : lead.maps === 'Não verificado' ? 'blue' : lead.maps === 'Cadastro incompleto' ? 'yellow' : 'green';
-  return `<article class="lead-card"><div class="card-top"><div><div class="card-name">${esc(lead.name)}</div><div class="card-location">${esc(lead.category)} · ${esc(lead.city)}</div></div><span class="heat-badge">♨ ${lead.heat}/100</span></div><div class="card-tags"><span class="tag ${websiteTag[0]}">${websiteTag[1]}</span><span class="tag ${mapsTone}">Maps: ${esc(mapsLabel)}</span><span class="status-badge ${statusTone(lead.stage)}">${stageLabel(lead.stage)}</span></div><p class="card-evidence">${esc(lead.evidence)}</p><div class="card-footer"><select class="status-select" data-lead-stage="${lead.id}" aria-label="Etapa de ${esc(lead.name)}">${LEAD_STAGES.map(([id, label]) => `<option value="${id}" ${id === lead.stage ? 'selected' : ''}>${label}</option>`).join('')}</select>${count ? `<span class="muted" data-countdown-date="${esc(lead.responseDue || '')}" data-countdown-tone="plain">${count.text}</span>` : '<span class="muted">sem prazo</span>'}<a class="maps-link" href="${esc(mapsSearchUrl(lead))}" target="_blank" rel="noopener noreferrer" aria-label="Pesquisar ${esc(lead.name)} no Google Maps">Ver no Maps ↗</a><button class="detail-link" data-lead-id="${lead.id}">Abrir →</button></div>${message ? `<div class="row-meta" style="margin-top:12px">${message.sentAt ? 'Contato confirmado manualmente' : 'Mensagem pronta para revisão'}</div>` : ''}</article>`;
+  return `<article class="lead-card"><div class="card-top"><div><div class="card-name">${esc(lead.name)}</div><div class="card-location">${esc(lead.category)} · ${esc(lead.city)}</div></div><span class="heat-badge">♨ ${lead.heat}/100</span></div><div class="card-tags"><span class="tag ${websiteTag[0]}">${websiteTag[1]}</span><span class="tag ${mapsTone}">Maps: ${esc(mapsLabel)}</span><span class="status-badge ${statusTone(lead.stage)}">${stageLabel(lead.stage)}</span></div><p class="card-evidence">${esc(lead.evidence)}</p><div class="card-footer"><select class="status-select" data-lead-stage="${lead.id}" aria-label="Etapa de ${esc(lead.name)}">${LEAD_STAGES.map(([id, label]) => `<option value="${id}" ${id === lead.stage ? 'selected' : ''}>${label}</option>`).join('')}</select>${count ? `<span class="lead-response-deadline"><small>Prazo para resposta</small><strong data-countdown-date="${esc(lead.responseDue || '')}" data-countdown-tone="plain">${count.text}</strong></span>` : '<span class="lead-response-deadline empty">Sem prazo de resposta</span>'}<a class="maps-link" href="${esc(mapsSearchUrl(lead))}" target="_blank" rel="noopener noreferrer" aria-label="Pesquisar ${esc(lead.name)} no Google Maps">Ver no Maps ↗</a><button class="detail-link" data-lead-id="${lead.id}">Abrir →</button></div>${message ? `<div class="row-meta" style="margin-top:12px">${message.sentAt ? 'Contato confirmado manualmente' : 'Mensagem pronta para revisão'}</div>` : ''}</article>`;
 }
 
 function renderProjects() {
@@ -749,7 +759,7 @@ function openLeadDetail(id) {
       <label class="field"><span>Cidade / região</span><input class="field-input" name="city" value="${esc(lead.city)}" /></label>
       <label class="field"><span>Telefone / WhatsApp com DDD</span><input class="field-input" name="phone" inputmode="tel" autocomplete="tel" placeholder="(16) 99999-9999" value="${esc(lead.phone)}" /><small class="field-help">Necessário para abrir a conversa direta no WhatsApp.</small></label>
       <label class="field"><span>Etapa comercial</span><select class="field-select" name="stage">${LEAD_STAGES.map(([stage, label]) => `<option value="${stage}" ${stage === lead.stage ? 'selected' : ''}>${label}</option>`).join('')}</select><small class="field-help">“Venda fechada” significa que contratou. “Encerrado sem venda” significa que a oportunidade terminou sem contratação.</small></label>
-      <label class="field"><span>Prazo para resposta</span><input class="field-input" name="responseDue" type="datetime-local" value="${esc(dueValue)}" /></label>
+      <label class="field"><span>Prazo para aguardar resposta</span><input class="field-input" name="responseDue" type="datetime-local" value="${esc(dueValue)}" /><small class="field-help">Começa quando você registra o envio manual. Quando o cliente responde, o contador é encerrado; ao enviar sua próxima mensagem, começa um novo prazo de 7 dias corridos.</small></label>
       <label class="field full"><span>Calor do lead · ${lead.heat}/100</span><span class="range-wrap"><input class="heat-range" type="range" name="heat" min="0" max="100" value="${Number(lead.heat) || 0}" /><strong class="range-value" id="edit-heat-value">${Number(lead.heat) || 0}/100</strong></span></label>
     </div>
     <h3 class="detail-section-title">Presença digital</h3><div class="form-grid">
@@ -774,7 +784,7 @@ function openLeadDetail(id) {
   el('[data-go-messages]')?.addEventListener('click', () => { currentLeadId = id; closeModal(); navigate('messages'); });
   el('[data-delete-lead]')?.addEventListener('click', () => openDeleteLeadConfirmation(id));
   all('[data-focus-field]').forEach((button) => button.addEventListener('click', () => { const field = el(`#edit-lead-form [name="${button.dataset.focusField}"]`); field?.scrollIntoView({ behavior: 'smooth', block: 'center' }); field?.focus(); }));
-  all('[data-flow-stage]').forEach((button) => button.addEventListener('click', () => { lead.stage = button.dataset.flowStage; if (lead.stage === 'contatado' && !lead.responseDue) lead.responseDue = daysFromNow(7); persist(); openLeadDetail(id); toast(`Etapa atualizada: ${stageLabel(lead.stage)}.`); }));
+  all('[data-flow-stage]').forEach((button) => button.addEventListener('click', () => { lead.stage = button.dataset.flowStage; if (['respondeu', 'interessado', 'ganho', 'perdido', 'nao-contatar'].includes(lead.stage)) lead.responseDue = null; if (lead.stage === 'contatado' && !lead.responseDue) lead.responseDue = daysFromNow(7); persist(); openLeadDetail(id); toast(`Etapa atualizada: ${stageLabel(lead.stage)}.`); }));
   el('[data-flow-open-message]')?.addEventListener('click', () => { lead.stage = lead.stage === 'qualificado' ? 'mensagem' : lead.stage; currentLeadId = id; persist(); closeModal(); navigate('messages'); });
   el('[data-create-project-from-lead]')?.addEventListener('click', () => createProjectFromLead(id));
   all('[data-flow-project-stage]').forEach((button) => button.addEventListener('click', () => { if (!project) return; project.stage = button.dataset.flowProjectStage; persist(); openLeadDetail(id); toast(`Projeto avançou para: ${stageLabel(project.stage, PROJECT_STAGES)}.`); }));
@@ -860,10 +870,12 @@ function saveLeadDetails(event) {
   lead.instagramUrl = safeUrl(instagramUrl);
   lead.instagramStatus = lead.instagramUrl ? 'Encontrado' : String(form.get('instagramStatus'));
   lead.heat = Math.max(0, Math.min(100, Number(form.get('heat')) || 0));
+  const previousStage = lead.stage;
   const nextStage = String(form.get('stage'));
   if (LEAD_STAGES.some(([stage]) => stage === nextStage)) lead.stage = nextStage;
   const due = String(form.get('responseDue') || '');
   lead.responseDue = due ? new Date(due).toISOString() : null;
+  if (previousStage !== lead.stage && ['respondeu', 'interessado', 'ganho', 'perdido', 'nao-contatar'].includes(lead.stage)) lead.responseDue = null;
   if (lead.stage === 'contatado' && !lead.responseDue) lead.responseDue = daysFromNow(7);
   state.settings.demo = false;
   persist();
@@ -873,7 +885,7 @@ function saveLeadDetails(event) {
 }
 function openDeleteLeadConfirmation(id) { const lead = leadById(id); if (!lead) return; modal(`<div class="modal-header"><div><p class="page-kicker">Confirmação necessária</p><h2>Excluir ${esc(lead.name)}?</h2><p>Esta ação remove o cliente e os registros relacionados.</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><div class="delete-warning"><strong>Serão removidos:</strong><span>este lead, seus projetos e rascunhos de mensagem.</span></div><div class="modal-actions"><button class="ghost-btn" data-modal-close>Cancelar</button><button class="danger-btn" data-confirm-delete-lead="${esc(lead.id)}">Confirmar exclusão</button></div>`); el('[data-confirm-delete-lead]')?.addEventListener('click', () => deleteLead(id)); }
 function deleteLead(id) { const lead = leadById(id); if (!lead) return; const name = lead.name.trim().toLocaleLowerCase('pt-BR'); state.leads = state.leads.filter((item) => item.id !== id); state.projects = state.projects.filter((item) => item.leadId !== id && String(item.name || '').trim().toLocaleLowerCase('pt-BR') !== name); state.messages = state.messages.filter((item) => item.leadId !== id); if (currentLeadId === id) currentLeadId = null; if (currentMessageId && !state.messages.some((item) => item.id === currentMessageId)) currentMessageId = null; persist(); closeModal(); renderPages(); toast(`${lead.name} e os registros relacionados foram excluídos.`); }
-function updateLeadStage(id, stage) { const lead = leadById(id); if (!lead) return; lead.stage = stage; if (stage === 'contatado' && !lead.responseDue) lead.responseDue = daysFromNow(7); persist(); renderPages(); toast(`Etapa atualizada: ${stageLabel(stage)}.`); }
+function updateLeadStage(id, stage) { const lead = leadById(id); if (!lead) return; lead.stage = stage; if (['respondeu', 'interessado', 'ganho', 'perdido', 'nao-contatar'].includes(stage)) lead.responseDue = null; if (stage === 'contatado' && !lead.responseDue) lead.responseDue = daysFromNow(7); persist(); renderPages(); toast(`Etapa atualizada: ${stageLabel(stage)}.`); }
 
 function importResearchCandidates(runId) {
   const run = agentRuntime.currentRun?.id === runId ? agentRuntime.currentRun : agentRuntime.history?.find((item) => item.id === runId);
@@ -980,7 +992,7 @@ async function handleCustomerReplySubmit(event) {
     const response = await fetch('/api/agent-runtime/customer-reply', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        lead: { name: lead.name, category: lead.category, city: lead.city, website: lead.website, websiteUrl: lead.websiteUrl, salesScript: lead.salesScript, evidence: lead.evidence },
+        lead: { name: lead.name, category: lead.category, city: lead.city, website: lead.website, websiteUrl: lead.websiteUrl, salesScript: lead.salesScript, evidence: lead.evidence, stage: lead.stage },
         initialMessage: message.text, initialWasSent: Boolean(message.sentAt), conversation: message.conversation || [], customerReply: customerText
       })
     });
@@ -989,9 +1001,17 @@ async function handleCustomerReplySubmit(event) {
     message.conversation ||= [];
     message.conversation.push({ role: 'cliente', text: customerText, createdAt: isoDate(Date.now()) });
     message.conversation.push({ role: 'sugestao', status: 'rascunho', text: removeEmojis(payload.reply || ''), createdAt: isoDate(Date.now()) });
-    if (lead.stage === 'contatado') lead.stage = 'respondeu';
+    const previousStage = lead.stage;
+    const nextStage = ['interessado', 'respondeu', 'perdido', 'nao-contatar'].includes(payload.nextStage) ? payload.nextStage : 'respondeu';
+    if (lead.stage !== 'ganho') {
+      if (nextStage === 'nao-contatar') { lead.stage = 'nao-contatar'; lead.nextAction = 'Não realizar novo contato'; }
+      else if (nextStage === 'perdido' && lead.stage !== 'nao-contatar') { lead.stage = 'perdido'; lead.nextAction = 'Oportunidade encerrada sem venda'; }
+      else if (nextStage === 'interessado' && !['perdido', 'nao-contatar'].includes(lead.stage)) { lead.stage = 'interessado'; lead.nextAction = 'Apresentar uma ideia e alinhar os próximos passos'; }
+      else if (nextStage === 'respondeu' && lead.stage === 'contatado') { lead.stage = 'respondeu'; lead.nextAction = 'Responder ao cliente e registrar o próximo passo'; }
+    }
+    lead.responseDue = null;
     persist();
-    toast('Sugestão pronta. Revise antes de copiar.');
+    toast(lead.stage !== previousStage ? `Resposta registrada. Etapa atualizada para ${stageLabel(lead.stage)}.` : 'Resposta registrada. O prazo de espera foi encerrado. Revise a sugestão da IA.');
   } catch (error) {
     toast(error.message || 'Não consegui analisar a resposta.');
   } finally {
@@ -1021,11 +1041,12 @@ function markCustomerReplySent(id) {
   suggestion.sentAt = isoDate(Date.now());
   const lead = leadById(message.leadId);
   if (lead && ['contatado', 'respondeu'].includes(lead.stage)) lead.stage = 'respondeu';
+  if (lead && !['ganho', 'perdido', 'nao-contatar'].includes(lead.stage)) lead.responseDue = daysFromNow(7);
   persist();
   renderPages();
-  toast('Resposta registrada como enviada por você.');
+  toast(lead && !['ganho', 'perdido', 'nao-contatar'].includes(lead.stage) ? 'Resposta enviada manualmente. Novo prazo de retorno: 7 dias corridos.' : 'Resposta registrada como enviada por você.');
 }
-function confirmSent(id) { const message = state.messages.find((item) => item.id === id); if (!message) return; message.sentAt = message.sentAt || isoDate(Date.now()); const lead = leadById(message.leadId); if (lead && ['novo', 'verificar', 'qualificado', 'mensagem', 'aprovacao'].includes(lead.stage)) { lead.stage = 'contatado'; lead.responseDue = lead.responseDue || daysFromNow(7); } persist(); renderPages(); toast('Envio manual registrado. Prazo de resposta iniciado em 7 dias corridos.'); }
+function confirmSent(id) { const message = state.messages.find((item) => item.id === id); if (!message) return; const firstConfirmation = !message.sentAt; message.sentAt = message.sentAt || isoDate(Date.now()); const lead = leadById(message.leadId); if (lead) { if (['novo', 'verificar', 'qualificado', 'mensagem', 'aprovacao'].includes(lead.stage)) lead.stage = 'contatado'; if (firstConfirmation && !['ganho', 'perdido', 'nao-contatar'].includes(lead.stage)) lead.responseDue = daysFromNow(7); } persist(); renderPages(); toast(firstConfirmation ? 'Envio registrado. O prazo para aguardar resposta é de 7 dias corridos.' : 'O envio manual já estava registrado.'); }
 function exportData() { const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `central-comercial-${new Date().toISOString().slice(0, 10)}.json`; anchor.click(); URL.revokeObjectURL(url); toast('Backup JSON exportado.'); }
 function resetData() { if (!confirm('Restaurar os dados de demonstração? Seus registros locais atuais serão substituídos.')) return; state = seedState(); currentLeadId = state.leads[0]?.id; currentMessageId = state.messages[0]?.id; persist(); renderPages(); toast('Dados de demonstração restaurados.'); }
 function toast(message) { const node = el('#toast'); if (!node) return; node.textContent = message; node.classList.add('show'); clearTimeout(window.__toastTimer); window.__toastTimer = setTimeout(() => node.classList.remove('show'), 3400); }

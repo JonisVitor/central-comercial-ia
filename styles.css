@@ -146,7 +146,7 @@ h3 { margin-bottom: 4px; font-size: 15px; }
 .empty-state { padding: 28px 10px; color: var(--text-3); text-align: center; font-size: 13px; }
 .empty-state strong { display: block; margin-bottom: 4px; color: var(--text-2); }
 .pipeline-panel { margin-top: 16px; }
-.pipeline { display: grid; grid-template-columns: repeat(7, minmax(80px, 1fr)); gap: 6px; }
+.pipeline { display: grid; grid-template-columns: repeat(8, minmax(80px, 1fr)); gap: 6px; }
 .pipeline-step { position: relative; padding: 12px 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--control); }
 .pipeline-step::before { content: ''; display: block; width: 7px; height: 7px; margin-bottom: 11px; border-radius: 50%; background: var(--text-4); }
 .pipeline-step.hot::before { background: var(--orange); box-shadow: 0 0 0 4px var(--orange-soft); }
@@ -182,6 +182,10 @@ h3 { margin-bottom: 4px; font-size: 15px; }
 .tag.blue, .status-badge.blue { color: var(--blue); background: var(--blue-soft); }
 .card-evidence { min-height: 38px; margin-bottom: 15px; color: var(--text-2); font-size: 12px; line-height: 1.45; }
 .card-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 13px; border-top: 1px solid var(--border); }
+.lead-response-deadline { display: grid; gap: 2px; color: var(--text-2); font-size: 11px; line-height: 1.3; }
+.lead-response-deadline small { color: var(--text-3); font-size: 10px; }
+.lead-response-deadline strong { font-weight: 600; }
+.lead-response-deadline.empty { color: var(--text-3); }
 .status-select { max-width: 170px; min-height: 32px; padding: 0 7px; border: 1px solid var(--border); border-radius: 7px; color: var(--text-2); background: var(--control); font-size: 11px; }
 .detail-link { border: 0; color: var(--orange); background: transparent; font-size: 13px; }
 .maps-link { padding: 7px 8px; border: 1px solid var(--border); border-radius: 7px; color: var(--text-2); text-decoration: none; white-space: nowrap; font-size: 12px; transition: border-color .16s ease, color .16s ease, background .16s ease; }
@@ -491,7 +495,7 @@ h3 { margin-bottom: 4px; font-size: 15px; }
   h1 { font-size: 34px; }
   .metric-card { min-height: 108px; padding: 14px; }
   .metric-value { margin-top: 15px; font-size: 27px; }
-  .pipeline { overflow-x: auto; grid-template-columns: repeat(7, 108px); padding-bottom: 4px; }
+  .pipeline { overflow-x: auto; grid-template-columns: repeat(8, 108px); padding-bottom: 4px; }
   .lead-grid, .project-grid, .settings-grid { grid-template-columns: 1fr; }
   .search-input { max-width: none; }
   .filter-spacer { display: none; }
