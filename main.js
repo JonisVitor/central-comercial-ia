@@ -258,15 +258,19 @@ function renderAssistant() {
 }
 
 function handleAssistantDeleteRequest(text) {
-  const actionPattern = /\b(excluir|exclua|exclui|apagar|apague|apaga|remover|remova|remove|deletar|delete|deleta|retirar|retire|tira|tirar)\b/giu;
-  const actions = [...String(text).matchAll(actionPattern)];
+  const actionPattern = /^\s*(?:(?:por favor[,\s]+|agora\s+|você pode\s+|voce pode\s+|pode\s+|quero\s+|preciso\s+|me ajuda a\s+|me ajude a\s+))*(excluir|exclua|exclui|apagar|apague|apaga|remover|remova|remove|deletar|delete|deleta|retirar|retire|retira|tira|tirar|tire)\b/i;
+  const actionMatch = String(text).match(actionPattern);
+  const actions = actionMatch ? [actionMatch] : [];
   const previousMessages = assistantMessages.slice(0, -1);
   const assistantHistory = previousMessages.filter((item) => item.role === 'assistant');
   const previousAssistant = assistantHistory.at(-1)?.text || '';
   const followsConfirmedDeletion = /foi excluído do painel|foram excluídos do painel/i.test(previousAssistant);
-  const hadFailedNameMatch = assistantHistory.some((item) => /não encontrei um lead|mais de um possível lead|nome mais completo/i.test(item.text || ''));
-  const retryAfterSpawnFailure = /spawn eperm/i.test(previousAssistant) && hadFailedNameMatch;
-  const canUseClarification = !actions.length && (/não encontrei um lead|mais de um possível lead|nome mais completo/i.test(previousAssistant) || retryAfterSpawnFailure || followsConfirmedDeletion);
+  const lastMessageWasNameError = /não encontrei um lead|mais de um possível lead|nome mais completo/i.test(previousAssistant);
+  const hasConversationRequest = /[?¿]/.test(text) || /\b(quero|mude|mudar|edite|editar|reescreva|responda|resposta|mensagem|prepare|crie|alterar|altere|troque|explique|explica|ajude|preciso|como|qual|por que|faça|faca)\b/i.test(text);
+  const nameOnlyClarification = text.length <= 180 && !hasConversationRequest;
+  const retryAfterSpawnFailure = /spawn eperm/i.test(previousAssistant) && nameOnlyClarification && assistantHistory.some((item) => /não encontrei um lead|mais de um possível lead|nome mais completo/i.test(item.text || ''));
+  const explicitAlsoFollowUp = /^(?:(?:e|agora)\s+)?tamb[eé]m\b/i.test(text);
+  const canUseClarification = !actions.length && ((lastMessageWasNameError && nameOnlyClarification) || retryAfterSpawnFailure || (followsConfirmedDeletion && explicitAlsoFollowUp && nameOnlyClarification));
   if (!actions.length && !canUseClarification) return { handled: false };
   const lastAction = actions.at(-1);
   const target = actions.length ? String(text).slice(lastAction.index + lastAction[0].length) : String(text);
