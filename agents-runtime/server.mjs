@@ -60,9 +60,11 @@ async function readBody(req) {
   }
   return JSON.parse(text || '{}');
 }
-function runCodex(executable, prompt, outputPath, cwd, { search = false } = {}) {
+// Luna is OpenAI's efficient choice for focused, high-volume tasks. Keep the
+// worker calls at low effort; the conversational sidebar opts into medium.
+function runCodex(executable, prompt, outputPath, cwd, { search = false, model = 'gpt-6-luna', reasoningEffort = 'low' } = {}) {
   return new Promise((resolve, reject) => {
-    const args = ['exec', '--ephemeral', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--cd', cwd, '--output-last-message', outputPath, '-'];
+    const args = ['exec', '--model', model, '--config', `model_reasoning_effort="${reasoningEffort}"`, '--ephemeral', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--cd', cwd, '--output-last-message', outputPath, '-'];
     // Business agents do not need the Cloudflare MCPs; disabling them per run
     // prevents unrelated OAuth prompts from blocking the Codex CLI subprocess.
     for (const server of ['cloudflare', 'cloudflare-bindings', 'cloudflare-builds', 'cloudflare-docs', 'cloudflare-observability']) {
@@ -298,7 +300,7 @@ async function handleChat(input) {
   chatBusy = true;
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'central-chat-'));
   try {
-      const reply = await runCodex(executable, prompt, path.join(tempDir, 'reply.txt'), tempDir);
+      const reply = await runCodex(executable, prompt, path.join(tempDir, 'reply.txt'), tempDir, { model: 'gpt-6-luna', reasoningEffort: 'medium' });
     return { reply: reply.slice(0, 6000) || 'Não consegui montar uma resposta com os dados disponíveis. Tente reformular.' };
   } finally {
     chatBusy = false;
