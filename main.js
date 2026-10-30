@@ -237,7 +237,7 @@ function renderAssistant() {
       <header class="assistant-header"><span class="assistant-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0-7.2 13l-.8 4 4-1A8.5 8.5 0 1 0 12 3.5Z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg></span><div><h2>Assistente da Central</h2><p>${agentRuntime.connected ? 'Codex local conectado' : 'Executor local desconectado'}</p></div><button class="assistant-close" type="button" data-assistant-close aria-label="Fechar conversa"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
       <div class="assistant-scope-notice"><strong>Codex local ${agentRuntime.connected ? 'conectado' : 'desconectado'}.</strong><span>Pedidos de pesquisa usam a busca web do Codex e aparecem na estação Pesquisador web. Análises e pesquisas não alteram o CRM nem enviam mensagens.</span>${agentRuntime.connected ? '' : '<span>Para conectar, inicie <code>npm run agents-runtime</code> no terminal deste computador.</span>'}</div>
       <div class="assistant-messages" role="log" aria-live="polite" aria-relevant="additions text">${messages}${assistantBusy ? '<div class="assistant-typing" role="status"><i></i><i></i><i></i><span>Preparando resposta…</span></div>' : ''}</div>
-      <form class="assistant-composer" data-assistant-form><label class="sr-only" for="assistant-input">Escreva uma instrução para os agentes</label><textarea id="assistant-input" name="message" rows="1" maxlength="2000" placeholder="Escreva sua mensagem…" ${assistantBusy || !agentRuntime.connected ? 'disabled' : ''} required></textarea><button type="submit" aria-label="Enviar mensagem" ${assistantBusy || !agentRuntime.connected ? 'disabled' : ''}><svg viewBox="0 0 24 24"><path d="M4 12 20 4l-5 16-3-7-8-1Z"/><path d="m12 13 8-9"/></svg></button></form>
+      <form class="assistant-composer" data-assistant-form><label class="sr-only" for="assistant-input">Escreva uma instrução para os agentes</label><textarea id="assistant-input" name="message" rows="1" maxlength="2000" placeholder="Escreva uma mensagem ou /clear para limpar…" ${assistantBusy ? 'disabled' : ''} required></textarea><button type="submit" aria-label="Enviar mensagem" ${assistantBusy ? 'disabled' : ''}><svg viewBox="0 0 24 24"><path d="M4 12 20 4l-5 16-3-7-8-1Z"/><path d="m12 13 8-9"/></svg></button></form>
       <p class="assistant-foot">Pesquisas usam seu plano Codex. Leads só entram após sua confirmação; o painel não envia mensagens.</p>
     </section>` : ''}
     <button class="assistant-fab" type="button" data-assistant-toggle aria-label="${assistantOpen ? 'Fechar assistente' : 'Abrir chat com agentes'}" aria-expanded="${assistantOpen}">${assistantOpen ? '<svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0-7.2 13l-.8 4 4-1A8.5 8.5 0 1 0 12 3.5Z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg>'}</button>
@@ -252,7 +252,17 @@ function renderAssistant() {
 
 async function sendAssistantMessage(rawText) {
   const text = String(rawText || '').trim();
+  if (text.toLocaleLowerCase('pt-BR') === '/clear') {
+    assistantMessages = [];
+    localStorage.removeItem(ASSISTANT_CHAT_STORAGE);
+    assistantBusy = false;
+    toast('Conversa da IA limpa. Leads e conversas com clientes foram mantidos.');
+    renderAssistant();
+    el('#assistant-input')?.focus();
+    return;
+  }
   if (!text || assistantBusy) return;
+  if (!agentRuntime.connected) { toast('Conecte o executor local do Codex para conversar com a IA.'); return; }
   assistantMessages.push({ role: 'user', text });
   assistantBusy = true;
   saveAssistantMessages();
