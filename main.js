@@ -254,26 +254,48 @@ function renderAssistant() {
 function handleAssistantDeleteRequest(text) {
   const actionPattern = /\b(excluir|exclua|exclui|apagar|apague|apaga|remover|remova|remove|deletar|delete|deleta|retirar|retire|tira|tirar)\b/giu;
   const actions = [...String(text).matchAll(actionPattern)];
-  if (!actions.length) return { handled: false };
+  const previousMessages = assistantMessages.slice(0, -1);
+  const assistantHistory = previousMessages.filter((item) => item.role === 'assistant');
+  const previousAssistant = assistantHistory.at(-1)?.text || '';
+  const hadFailedNameMatch = assistantHistory.some((item) => /não encontrei um lead|mais de um possível lead|nome mais completo/i.test(item.text || ''));
+  const retryAfterSpawnFailure = /spawn eperm/i.test(previousAssistant) && hadFailedNameMatch;
+  const canUseClarification = !actions.length && (/não encontrei um lead|mais de um possível lead|nome mais completo/i.test(previousAssistant) || retryAfterSpawnFailure);
+  if (!actions.length && !canUseClarification) return { handled: false };
   const lastAction = actions.at(-1);
-  const target = String(text).slice(lastAction.index + lastAction[0].length);
+  const target = actions.length ? String(text).slice(lastAction.index + lastAction[0].length) : String(text);
   const ignored = new Set('o a os as um uma uns umas de do da dos das no na nos nas e lead leads cliente clientes empresa empresas registro registros por favor pra para painel lista cadastro prospeccao prospeccão da daqui esse essa isso aquele aquela minha meu quero pode poderia consegue quando pedir eu me mim que chamado chamada aqui'.split(' '));
   const targetTokens = importKey(target).split(' ').filter((token) => token && !ignored.has(token));
   if (!targetTokens.length) return { handled: false };
-  const candidates = state.leads.map((lead) => {
+  const compactTarget = String(target).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const multipleTargets = /\s+e\s+|[,;]/i.test(target);
+  const knownNames = state.leads.map((lead) => ({ lead, compactName: String(lead.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, ''), nameTokens: [...new Set(importKey(lead.name).split(' '))] }));
+  const distinctiveTokens = new Map();
+  for (const token of new Set(targetTokens.filter((part) => part.length >= 4))) {
+    const singular = token.endsWith('s') ? token.slice(0, -1) : token;
+    const owners = knownNames.filter(({ compactName, nameTokens }) => compactName.includes(token) || compactName.includes(singular) || nameTokens.includes(token) || nameTokens.includes(singular));
+    if (owners.length === 1) distinctiveTokens.set(token, owners[0].lead.id);
+  }
+  const candidates = knownNames.map(({ lead, compactName }) => {
     const nameTokens = [...new Set(importKey(lead.name).split(' '))];
-    const tokenScore = new Set(targetTokens.filter((token) => nameTokens.includes(token))).size;
-    const compactName = nameTokens.join('');
-    const compactMatch = targetTokens.length === 1 && compactName.includes(targetTokens[0]) ? 1 : 0;
-    const score = Math.max(tokenScore, compactMatch);
-    return { lead, score, required: Math.min(2, nameTokens.length, targetTokens.length) };
-  }).filter((item) => item.score >= item.required).sort((a, b) => b.score - a.score);
+    const tokenScore = new Set(targetTokens.filter((token) => {
+      const singular = token.endsWith('s') ? token.slice(0, -1) : token;
+      return nameTokens.includes(token) || nameTokens.includes(singular) || compactName.includes(token) || compactName.includes(singular);
+    })).size;
+    const compactLeadName = String(lead.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const exactNameMatch = importKey(target).includes(importKey(lead.name)) || importKey(lead.name).includes(importKey(target)) || (compactLeadName.length >= 5 && compactTarget.includes(compactLeadName));
+    const partialNameMatch = distinctiveTokens.size > 0 && [...distinctiveTokens.values()].includes(lead.id);
+    const score = tokenScore + (exactNameMatch ? 100 : 0);
+    return { lead, score, required: Math.min(2, nameTokens.length, targetTokens.length), partialNameMatch };
+  }).filter((item) => item.partialNameMatch || item.score >= item.required && (!multipleTargets || item.lead.name && compactTarget.includes(String(item.lead.name).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '')))).sort((a, b) => b.score - a.score);
   if (!candidates.length) return { handled: true, reply: `Não encontrei um lead que corresponda a “${target.trim()}”. Confira o nome como aparece na lista; nada foi excluído.` };
-  const topScore = candidates[0].score;
-  const best = candidates.filter((item) => item.score === topScore);
-  if (best.length > 1) return { handled: true, reply: `Encontrei mais de um possível lead: ${best.map((item) => item.lead.name).join('; ')}. Escreva “excluir” seguido do nome mais completo para eu abrir a confirmação. Nada foi apagado.` };
-  const lead = best[0].lead;
-  return { handled: true, leadId: lead.id, reply: `Encontrei “${lead.name}” e abri a confirmação de exclusão. O lead e os projetos e mensagens relacionados só serão removidos se você confirmar.` };
+  const matched = [...new Map(candidates.map((item) => [item.lead.id, item.lead])).values()];
+  return {
+    handled: true,
+    leadIds: matched.map((lead) => lead.id),
+    reply: matched.length === 1
+      ? `Encontrei “${matched[0].name}” e abri a confirmação. Só vou excluir o lead e os projetos e mensagens relacionados se você confirmar.`
+      : `Encontrei ${matched.length} leads: ${matched.map((lead) => lead.name).join('; ')}. Abri uma confirmação conjunta; nenhum será excluído sem você confirmar.`
+  };
 }
 
 async function sendAssistantMessage(rawText) {
@@ -294,7 +316,7 @@ async function sendAssistantMessage(rawText) {
     assistantMessages.push({ role: 'assistant', text: deleteResult.reply });
     saveAssistantMessages();
     renderAssistant();
-    if (deleteResult.leadId) openDeleteLeadConfirmation(deleteResult.leadId, true);
+    if (deleteResult.leadIds?.length) openDeleteLeadsConfirmation(deleteResult.leadIds, true);
     el('#assistant-input')?.focus();
     return;
   }
@@ -939,8 +961,24 @@ function saveLeadDetails(event) {
   renderPages();
   toast(isLocalHost ? 'Ficha atualizada neste dispositivo.' : 'Ficha atualizada e enviada para sincronização.');
 }
-function openDeleteLeadConfirmation(id, fromAssistant = false) { const lead = leadById(id); if (!lead) return; modal(`<div class="modal-header"><div><p class="page-kicker">Confirmação necessária</p><h2>Excluir ${esc(lead.name)}?</h2><p>Esta ação remove o cliente e os registros relacionados.</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><div class="delete-warning"><strong>Serão removidos:</strong><span>este lead, seus projetos e mensagens.</span></div><div class="modal-actions"><button class="ghost-btn" ${fromAssistant ? 'data-assistant-delete-cancel' : 'data-modal-close'}>Cancelar</button><button class="danger-btn" data-confirm-delete-lead="${esc(lead.id)}">Confirmar exclusão</button></div>`); el('[data-confirm-delete-lead]')?.addEventListener('click', () => { if (fromAssistant) { assistantMessages.push({ role: 'assistant', text: `O lead “${lead.name}” foi excluído do painel, junto com os registros relacionados.` }); saveAssistantMessages(); } deleteLead(id); if (fromAssistant) renderAssistant(); }); if (fromAssistant) el('[data-assistant-delete-cancel]')?.addEventListener('click', () => { closeModal(); assistantMessages.push({ role: 'assistant', text: `Exclusão cancelada. “${lead.name}” continua no painel.` }); saveAssistantMessages(); renderAssistant(); }); }
-function deleteLead(id) { const lead = leadById(id); if (!lead) return; const name = lead.name.trim().toLocaleLowerCase('pt-BR'); state.leads = state.leads.filter((item) => item.id !== id); state.projects = state.projects.filter((item) => item.leadId !== id && String(item.name || '').trim().toLocaleLowerCase('pt-BR') !== name); state.messages = state.messages.filter((item) => item.leadId !== id); if (currentLeadId === id) currentLeadId = null; if (currentMessageId && !state.messages.some((item) => item.id === currentMessageId)) currentMessageId = null; persist(); closeModal(); renderPages(); toast(`${lead.name} e os registros relacionados foram excluídos.`); }
+function openDeleteLeadConfirmation(id, fromAssistant = false) { openDeleteLeadsConfirmation([id], fromAssistant); }
+function openDeleteLeadsConfirmation(ids, fromAssistant = false) {
+  const leads = [...new Map(ids.map((id) => leadById(id)).filter(Boolean).map((lead) => [lead.id, lead])).values()];
+  if (!leads.length) return;
+  const names = leads.map((lead) => lead.name);
+  const title = leads.length === 1 ? `Excluir ${esc(names[0])}?` : `Excluir ${leads.length} leads?`;
+  const leadList = leads.length === 1 ? '' : `<ul class="delete-lead-list">${leads.map((lead) => `<li>${esc(lead.name)}</li>`).join('')}</ul>`;
+  modal(`<div class="modal-header"><div><p class="page-kicker">Confirmação necessária</p><h2>${title}</h2><p>Confira os nomes antes de confirmar.</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div>${leadList}<div class="delete-warning"><strong>Serão removidos:</strong><span>${leads.length === 1 ? 'este lead, seus projetos e mensagens.' : 'os leads selecionados, seus projetos e mensagens relacionadas.'}</span></div><div class="modal-actions"><button class="ghost-btn" ${fromAssistant ? 'data-assistant-delete-cancel' : 'data-modal-close'}>Cancelar</button><button class="danger-btn" data-confirm-delete-leads>Confirmar exclusão${leads.length > 1 ? ` (${leads.length})` : ''}</button></div>`);
+  el('[data-confirm-delete-leads]')?.addEventListener('click', () => {
+    leads.forEach((lead) => deleteLead(lead.id, false));
+    closeModal();
+    if (fromAssistant) { assistantMessages.push({ role: 'assistant', text: `${leads.length === 1 ? `O lead “${names[0]}” foi excluído` : `Os leads ${names.map((name) => `“${name}”`).join(' e ')} foram excluídos`} do painel, junto com os registros relacionados.` }); saveAssistantMessages(); renderAssistant(); }
+    renderPages();
+    toast(`${leads.length} lead${leads.length === 1 ? '' : 's'} e registros relacionados excluídos.`);
+  });
+  if (fromAssistant) el('[data-assistant-delete-cancel]')?.addEventListener('click', () => { closeModal(); assistantMessages.push({ role: 'assistant', text: `Exclusão cancelada. ${names.map((name) => `“${name}”`).join(' e ')} continuam no painel.` }); saveAssistantMessages(); renderAssistant(); });
+}
+function deleteLead(id, refresh = true) { const lead = leadById(id); if (!lead) return; const name = lead.name.trim().toLocaleLowerCase('pt-BR'); state.leads = state.leads.filter((item) => item.id !== id); state.projects = state.projects.filter((item) => item.leadId !== id && String(item.name || '').trim().toLocaleLowerCase('pt-BR') !== name); state.messages = state.messages.filter((item) => item.leadId !== id); if (currentLeadId === id) currentLeadId = null; if (currentMessageId && !state.messages.some((item) => item.id === currentMessageId)) currentMessageId = null; persist(); if (refresh) { closeModal(); renderPages(); toast(`${lead.name} e os registros relacionados foram excluídos.`); } }
 function updateLeadStage(id, stage) { const lead = leadById(id); if (!lead) return; lead.stage = stage; if (['respondeu', 'interessado', 'ganho', 'perdido', 'nao-contatar'].includes(stage)) lead.responseDue = null; if (stage === 'contatado' && !lead.responseDue) lead.responseDue = daysFromNow(7); persist(); renderPages(); toast(`Etapa atualizada: ${stageLabel(stage)}.`); }
 
 function importResearchCandidates(runId) {

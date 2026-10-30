@@ -32,10 +32,14 @@ async function findCodex() {
   const bin = path.join(process.env.LOCALAPPDATA || '', 'OpenAI', 'Codex', 'bin');
   try {
     const dirs = await fs.readdir(bin, { withFileTypes: true });
-    for (const dir of dirs.reverse()) {
+    const candidates = [];
+    for (const dir of dirs) {
+      if (!dir.isDirectory()) continue;
       const candidate = path.join(bin, dir.name, 'codex.exe');
-      try { await fs.access(candidate); codexPath = candidate; return candidate; } catch {}
+      try { const info = await fs.stat(candidate); if (info.isFile()) candidates.push({ candidate, modified: info.mtimeMs }); } catch {}
     }
+    candidates.sort((a, b) => b.modified - a.modified);
+    if (candidates[0]) { codexPath = candidates[0].candidate; return codexPath; }
   } catch {}
   throw new Error('Não encontrei o Codex CLI instalado. Instale ou atualize o app Codex e tente novamente.');
 }
@@ -72,19 +76,31 @@ function runCodex(executable, prompt, outputPath, cwd, { search = false, model =
     }
     // `--search` is a top-level Codex option, so it must precede `exec`.
     if (search) args.unshift('--search');
+    const launch = (attempt = 0) => {
     const child = spawn(executable, args, { cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: process.env });
     // JSONL events are not used here; drain them so a verbose/search run cannot
     // fill the OS pipe and stall before writing its final answer file.
     child.stdout.resume();
     let stderr = '';
     child.stderr.on('data', (chunk) => { stderr = redact(stderr + chunk.toString()); });
-    child.on('error', (error) => reject(new Error(`Falha ao iniciar Codex CLI: ${error.message}`)));
+    child.on('error', (error) => {
+      if (['EPERM', 'EAGAIN'].includes(error.code) && attempt < 2) {
+        setTimeout(() => launch(attempt + 1), 300 * (attempt + 1));
+        return;
+      }
+      const detail = error.code === 'EPERM'
+        ? 'O Windows bloqueou a inicialização do Codex CLI (EPERM). Feche e reabra o executor local; se persistir, reinicie o app Codex.'
+        : `${error.code || 'erro'}: ${error.message}`;
+      reject(new Error(`Falha ao iniciar Codex CLI: ${detail}`));
+    });
     child.on('close', async (code) => {
       if (code !== 0) return reject(new Error(redact(stderr) || `Codex CLI terminou com código ${code}.`));
       try { resolve((await fs.readFile(outputPath, 'utf8')).trim()); }
       catch { reject(new Error('O Codex CLI terminou sem produzir o resultado final.')); }
     });
     child.stdin.end(prompt);
+    };
+    launch();
   });
 }
 async function startRun(input) {
