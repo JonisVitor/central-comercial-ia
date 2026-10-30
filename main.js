@@ -500,12 +500,12 @@ function autoImportProspectingRuns() {
       let added = 0;
       for (const item of candidates) {
         const key = `${importKey(item.name)}|${importKey(item.city)}`;
-        if (!item.name || !item.category || !item.city || (!safeUrl(item.mapsUrl) && !safeUrl(item.sourceUrl)) || known.has(key)) continue;
+        if (!item.name || !item.category || !item.city || item.website !== 'Não encontrado' || item.maps !== 'Encontrado' || item.smallLocalBusiness !== true || !(Number(item.mapsRating) > 0) || !(Number(item.mapsReviewCount) > 0) || !safeUrl(item.mapsUrl) || /\/maps\/search\//i.test(item.mapsUrl) || known.has(key)) continue;
         const mapsUrl = safeUrl(item.mapsUrl) || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${item.name} ${item.city}`)}`;
         state.leads.unshift({
           id:uid('lead'), name:item.name, category:item.category, city:item.city, phone:item.phone || '',
-          website:item.website === 'Encontrado' ? 'Encontrado' : 'Não verificado', websiteUrl:safeUrl(item.websiteUrl),
-          maps:'Não verificado', mapsUrl, instagramUrl:safeUrl(item.instagramUrl), instagramStatus:'Não verificado',
+          website:'Não encontrado', websiteUrl:'',
+          maps:'Encontrado', mapsUrl, mapsRating:Number(item.mapsRating), mapsReviewCount:Number(item.mapsReviewCount), instagramUrl:safeUrl(item.instagramUrl), instagramStatus:'Não verificado',
           heat:50, heatRationale:'Calor neutro; pesquisa ainda precisa de revisão.', stage:'verificar', evidence:item.evidence || 'Pesquisa pública inicial; conferir a ficha e os canais antes de qualificar.',
           source:item.source || 'Pesquisa pública assistida pelo Codex', sourceUrl:safeUrl(item.sourceUrl) || mapsUrl,
           nextAction:'Conferir ficha direta do Maps, site e Instagram antes de qualificar.',
@@ -520,7 +520,7 @@ function autoImportProspectingRuns() {
     }
     if (run.kind !== 'prospecting' || run.state !== 'complete') continue;
     const existing = new Set(state.leads.map(lead => `${importKey(lead.name)}|${importKey(lead.city)}`));
-    const ready = (run.candidates || []).filter(item => item.name && item.city && item.message && item.salesScript && !existing.has(`${importKey(item.name)}|${importKey(item.city)}`));
+    const ready = (run.candidates || []).filter(item => item.name && item.city && item.message && item.salesScript && item.website === 'Não encontrado' && item.smallLocalBusiness === true && item.maps === 'Encontrado' && Number(item.mapsRating) > 0 && Number(item.mapsReviewCount) > 0 && !/\/maps\/search\//i.test(item.mapsUrl || '') && !existing.has(`${importKey(item.name)}|${importKey(item.city)}`));
     for (const item of ready) {
       const mapsUrl = safeUrl(item.mapsUrl) || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${item.name} ${item.city}`)}`;
       const lead = { id:uid('lead'),name:item.name,category:item.category,city:item.city,phone:item.phone||'',website:item.website||'Não verificado',websiteUrl:safeUrl(item.websiteUrl),maps:item.maps==='Não encontrado'?'Não encontrado':'Não verificado',mapsUrl,instagramUrl:safeUrl(item.instagramUrl),instagramStatus:item.instagramStatus||'Não verificado',heat:Number(item.heat)||30,heatRationale:item.heatRationale||'',stage:'aprovacao',evidence:item.evidence||'',source:'Pesquisa pública assistida pelo Codex',sourceUrl:safeUrl(item.sourceUrl)||mapsUrl,nextAction:'Revisar a mensagem e o roteiro antes de enviar',salesScript:item.salesScript,notes:'Importado automaticamente pelo fluxo local do Codex; confira os dados e links.',responseDue:null,createdAt:isoDate(Date.now()),demo:false };
@@ -545,19 +545,19 @@ function autoImportProspectingRuns() {
       const verified = parseTagged(verificationTask?.result, 'CENTRAL_VERIFICATION_JSON')?.leads || [];
       const verificationByKey = new Map(verified.map(item => [`${importKey(item.name)}|${importKey(item.city)}`, item]));
       const reviewLeads = researched.map(item => ({ ...item, ...(verificationByKey.get(`${importKey(item.name)}|${importKey(item.city)}`) || {}) }))
-        .filter(item => item.identityConfirmed === true && Number(item.confidence) >= 0.65 && item.name && item.city && item.category);
+        .filter(item => item.identityConfirmed === true && Number(item.confidence) >= 0.65 && item.name && item.city && item.category && item.smallLocalBusiness === true && item.website === 'Não encontrado' && item.maps === 'Encontrado' && Number(item.mapsRating) > 0 && Number(item.mapsReviewCount) > 0 && !/\/maps\/search\//i.test(item.mapsUrl || ''));
       for (const item of reviewLeads) {
         const key = `${importKey(item.name)}|${importKey(item.city)}`;
         if (existing.has(key)) continue;
         const mapsUrl = safeUrl(item.mapsUrl) || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${item.name} ${item.city}`)}`;
-        const website = ['Encontrado', 'Não encontrado'].includes(item.website) ? item.website : 'Não verificado';
-        const maps = ['Encontrado', 'Não encontrado', 'Cadastro forte', 'Cadastro regular', 'Cadastro incompleto'].includes(item.maps) ? item.maps : 'Não verificado';
+        const website = 'Não encontrado';
+        const maps = 'Encontrado';
         const instagramStatus = ['Encontrado', 'Não encontrado'].includes(item.instagramStatus) ? item.instagramStatus : 'Não verificado';
         const researchEvidence = researched.find(source => `${importKey(source.name)}|${importKey(source.city)}` === key)?.evidence;
         const evidence = [researchEvidence, item.evidence].filter(Boolean).join(' ');
         state.leads.unshift({
           id:uid('lead'), name:item.name, category:item.category || 'Não informado', city:item.city,
-          phone:item.phone || '', website, websiteUrl:safeUrl(item.websiteUrl), maps, mapsUrl,
+          phone:item.phone || '', website, websiteUrl:'', maps, mapsUrl, mapsRating:Number(item.mapsRating), mapsReviewCount:Number(item.mapsReviewCount),
           instagramUrl:safeUrl(item.instagramUrl), instagramStatus, heat:50, heatRationale:'Calor neutro; ainda não qualificado para contato.',
           stage:'verificar', evidence, source:'Pesquisa pública assistida pelo Codex', sourceUrl:safeUrl(item.sourceUrl) || mapsUrl,
           nextAction:'Conferir a ficha direta do Maps, site e Instagram antes de qualificar.',
