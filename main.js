@@ -400,6 +400,7 @@ async function sendAssistantMessage(rawText) {
     return;
   }
   if (!text || assistantBusy) return;
+  const draftTarget = findAssistantDraftTarget(text);
   assistantMessages.push({ role: 'user', text });
   const deleteResult = handleAssistantDeleteRequest(text);
   if (deleteResult.handled) {
@@ -420,11 +421,18 @@ async function sendAssistantMessage(rawText) {
   try {
     const response = await fetch('/api/agent-runtime/chat', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, history: assistantMessages.slice(-12), leads, projects, messages })
+      body: JSON.stringify({ message: text, history: assistantMessages.slice(-12), leads, projects, messages, activeConversation: draftTarget?.context || null })
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || 'Não foi possível responder agora.');
-    assistantMessages.push({ role: 'assistant', text: payload.reply });
+    if (draftTarget && payload.reply && applyAssistantDraftUpdate(draftTarget, payload.reply)) {
+      persist();
+      renderPages();
+      const destination = draftTarget.kind === 'customer-reply' ? 'rascunho de resposta' : 'mensagem inicial';
+      assistantMessages.push({ role: 'assistant', text: `Atualizei o ${destination} de ${draftTarget.leadName} na conversa. Revise o texto no painel antes de copiar ou enviar.` });
+    } else {
+      assistantMessages.push({ role: 'assistant', text: payload.reply });
+    }
     if (payload.run?.currentRun) {
       agentRuntime = payload.run;
       selectedRunId = payload.run.currentRun.id;
@@ -437,6 +445,45 @@ async function sendAssistantMessage(rawText) {
   assistantBusy = false;
   saveAssistantMessages();
   renderAssistant();
+}
+
+function findAssistantDraftTarget(rawText) {
+  const normalized = String(rawText || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR');
+  const asksToChange = /\b(?:mude|muda|mudar|troque|troca|trocar|trocasse|substitua|substituir|reescreva|reformule|melhore|refaca|refaz|ajuste|ajusta|corrija|corrige|altere|altera|modifique|modifica)\b/.test(normalized) || /\bnao gostei\b|\bfaz outra\b|\bcria outra\b|\bnova versao\b/.test(normalized);
+  if (!asksToChange || /\b(?:exclua|apague|remova|delete|status|etapa)\b/.test(normalized)) return null;
+  const message = state.messages.find((item) => item.id === currentMessageId) || messageByLead(currentLeadId);
+  const lead = message && leadById(message.leadId);
+  if (!message || !lead) return null;
+  const explicitInitial = /\b(?:mensagem inicial|primeiro contato|abordagem inicial)\b/.test(normalized);
+  if (!explicitInitial) {
+    const suggestion = [...(message.conversation || [])].reverse().find((item) => item.role === 'sugestao' && item.status !== 'enviada');
+    if (suggestion) return {
+      kind: 'customer-reply', message, suggestion, leadName: lead.name,
+      context: { leadName: lead.name, leadId: lead.id, messageId: message.id, targetKind: 'customer-reply', targetText: suggestion.text, initialMessage: message.text, conversation: (message.conversation || []).slice(-16) }
+    };
+  }
+  if (!message.sentAt && explicitInitial) return {
+    kind: 'initial-message', message, leadName: lead.name,
+    context: { leadName: lead.name, leadId: lead.id, messageId: message.id, targetKind: 'initial-message', targetText: message.text, initialMessage: message.text, conversation: (message.conversation || []).slice(-16) }
+  };
+  return null;
+}
+
+function applyAssistantDraftUpdate(target, text) {
+  const replacement = removeEmojis(String(text || '').trim());
+  if (!replacement) return false;
+  if (target.kind === 'customer-reply') {
+    if (!target.message.conversation?.includes(target.suggestion) || target.suggestion.status === 'enviada') return false;
+    target.suggestion.text = replacement;
+    target.suggestion.updatedAt = isoDate(Date.now());
+    return true;
+  }
+  if (target.kind === 'initial-message' && !target.message.sentAt) {
+    target.message.text = replacement;
+    target.message.updatedAt = isoDate(Date.now());
+    return true;
+  }
+  return false;
 }
 
 function navItem(page, icon, label) { return `<button class="nav-item ${currentPage === page ? 'active' : ''}" data-page="${page}"><span class="nav-icon">${icon}</span><span>${label}</span></button>`; }
