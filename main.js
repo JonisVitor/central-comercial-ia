@@ -10,6 +10,8 @@ const LEAD_STAGES = [
   ['negociacao', 'Negociação'], ['ganho', 'Venda fechada'], ['perdido', 'Encerrado sem venda'], ['nao-contatar', 'Não contatar']
 ];
 const CLOSED_LEAD_STAGES = ['ganho', 'perdido', 'nao-contatar'];
+const MAPS_STATUSES = ['Não verificado', 'Não encontrado', 'Encontrado', 'Cadastro incompleto', 'Cadastro regular', 'Cadastro forte'];
+const INSTAGRAM_ACTIVITY_STATUSES = ['Não verificado', 'Ativo · publicou nos últimos 90 dias', 'Sem publicação nos últimos 90 dias', 'Não foi possível confirmar', 'Não se aplica · perfil não encontrado'];
 const PROJECT_STAGES = [
   ['confirmado', 'Venda confirmada'], ['materiais', 'Aguardando materiais'], ['producao', 'Em produção'],
   ['revisao', 'Revisão do cliente'], ['ajustes', 'Ajustes adicionais'], ['hospedagem', 'Hospedagem configurada'],
@@ -47,6 +49,21 @@ const formatAgentResult = (value = '') => esc(value)
   .replace(/https:\/\/[^\s<>()]+/g, (raw) => `<a href="${raw}" target="_blank" rel="noopener noreferrer">${raw}</a>`);
 const mapsSearchUrl = (lead) => safeUrl(lead.mapsUrl) || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([lead.name, lead.city].filter(Boolean).join(' '))}`;
 const instagramSearchUrl = (lead) => `https://www.google.com/search?q=${encodeURIComponent(`${lead.name} ${lead.city} Instagram`)}`;
+function instagramActivityLabel(status = 'Não verificado') {
+  status = String(status || 'Não verificado');
+  if (status.startsWith('Ativo')) return 'Ativo';
+  if (status.startsWith('Sem publicação')) return 'Sem atividade recente';
+  if (status.startsWith('Não se aplica')) return 'Sem perfil';
+  if (status === 'Não foi possível confirmar') return 'Atividade não confirmada';
+  return 'Atividade a verificar';
+}
+function instagramActivityTone(status = 'Não verificado') {
+  status = String(status || 'Não verificado');
+  if (status.startsWith('Ativo')) return 'green';
+  if (status.startsWith('Sem publicação')) return 'yellow';
+  if (status.startsWith('Não se aplica')) return 'red';
+  return 'blue';
+}
 const initials = (name = '') => name.split(' ').slice(0, 2).map((part) => part[0]).join('').toUpperCase();
 
 function seedState() {
@@ -111,6 +128,7 @@ function loadState() {
       saved.projects = saved.projects.filter((project) => project.demo !== true && project.demo !== DEMO_MARKER);
       saved.messages = saved.messages.filter((message) => realLeadIds.has(message.leadId));
       saved.settings = { demo: false, theme: 'dark', ...(saved.settings || {}), demo: false };
+      ensureLeadPresenceFields(saved);
       ensureLeadDrafts(saved);
       closeExpiredUnansweredLeads(saved);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
@@ -127,11 +145,20 @@ function loadAssistantMessages() {
 }
 function saveAssistantMessages() { localStorage.setItem(ASSISTANT_CHAT_STORAGE, JSON.stringify(assistantMessages.slice(-30))); }
 function persist() {
+  ensureLeadPresenceFields(state);
   ensureLeadDrafts(state);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   if (!isLocalHost && remoteHydrated) {
     clearTimeout(syncTimer);
     syncTimer = setTimeout(syncRemoteState, 250);
+  }
+}
+function ensureLeadPresenceFields(data) {
+  for (const lead of data?.leads || []) {
+    lead.instagramStatus ||= lead.instagramUrl ? 'Encontrado' : 'Não verificado';
+    lead.instagramActivity ||= 'Não verificado';
+    lead.instagramActivityEvidence ||= '';
+    lead.instagramCheckedAt ||= '';
   }
 }
 function ensureLeadDrafts(data) {
@@ -174,6 +201,7 @@ async function hydrateRemoteState() {
     if (hasRemoteState) {
       state = payload.state;
       state.settings = { demo: false, theme: 'dark', ...(state.settings || {}) };
+      ensureLeadPresenceFields(state);
       ensureLeadDrafts(state);
       automaticallyClosed = closeExpiredUnansweredLeads(state);
       currentLeadId = state.leads[0]?.id;
@@ -472,9 +500,11 @@ function renderLeads() {
 function renderLeadCard(lead) {
   const message = messageByLead(lead.id); const count = lead.responseDue ? countdown(lead.responseDue) : null;
   const websiteTag = lead.website === 'Não encontrado' ? ['red', 'Site não encontrado'] : lead.website === 'Não verificado' ? ['yellow', 'Site a verificar'] : ['green', 'Site identificado'];
-  const mapsLabel = lead.maps === 'Não verificado' ? 'a verificar' : lead.maps === 'Não encontrado' ? 'não encontrado' : lead.maps.replace('Cadastro ', '');
+  const instagramStatus = lead.instagramStatus || (lead.instagramUrl ? 'Encontrado' : 'Não verificado');
+  const instagramTone = instagramStatus === 'Encontrado' ? 'green' : instagramStatus === 'Não encontrado' ? 'red' : 'yellow';
+  const mapsLabel = lead.maps === 'Não verificado' ? 'a verificar' : lead.maps === 'Não encontrado' ? 'não encontrado' : lead.maps === 'Encontrado' ? 'encontrado' : lead.maps.replace('Cadastro ', '');
   const mapsTone = lead.maps === 'Não encontrado' ? 'red' : lead.maps === 'Não verificado' ? 'blue' : lead.maps === 'Cadastro incompleto' ? 'yellow' : 'green';
-  return `<article class="lead-card"><div class="card-top"><div><div class="card-name">${esc(lead.name)}</div><div class="card-location">${esc(lead.category)} · ${esc(lead.city)}</div></div><span class="heat-badge">♨ ${lead.heat}/100</span></div><div class="card-tags"><span class="tag ${websiteTag[0]}">${websiteTag[1]}</span><span class="tag ${mapsTone}">Maps: ${esc(mapsLabel)}</span><span class="status-badge ${statusTone(lead.stage)}">${stageLabel(lead.stage)}</span></div><p class="card-evidence">${esc(lead.evidence)}</p><div class="card-footer"><select class="status-select" data-lead-stage="${lead.id}" aria-label="Etapa de ${esc(lead.name)}">${LEAD_STAGES.map(([id, label]) => `<option value="${id}" ${id === lead.stage ? 'selected' : ''}>${label}</option>`).join('')}</select>${count ? `<span class="lead-response-deadline"><small>Prazo para resposta</small><strong data-countdown-date="${esc(lead.responseDue || '')}" data-countdown-tone="plain">${count.text}</strong></span>` : '<span class="lead-response-deadline empty">Sem prazo de resposta</span>'}<a class="maps-link" href="${esc(mapsSearchUrl(lead))}" target="_blank" rel="noopener noreferrer" aria-label="Pesquisar ${esc(lead.name)} no Google Maps">Ver no Maps ↗</a><button class="detail-link" data-lead-id="${lead.id}">Abrir →</button></div>${message ? `<div class="row-meta" style="margin-top:12px">${message.sentAt ? 'Contato confirmado manualmente' : 'Mensagem pronta para revisão'}</div>` : ''}</article>`;
+  return `<article class="lead-card"><div class="card-top"><div><div class="card-name">${esc(lead.name)}</div><div class="card-location">${esc(lead.category)} · ${esc(lead.city)}</div></div><span class="heat-badge">♨ ${lead.heat}/100</span></div><div class="card-tags"><span class="tag ${websiteTag[0]}">${websiteTag[1]}</span><span class="tag ${mapsTone}">Maps: ${esc(mapsLabel)}</span><span class="tag ${instagramTone}">Instagram: ${instagramStatus === 'Encontrado' ? 'perfil encontrado' : instagramStatus === 'Não encontrado' ? 'não encontrado' : 'a verificar'}</span><span class="tag ${instagramActivityTone(lead.instagramActivity)}">Instagram ${esc(instagramActivityLabel(lead.instagramActivity))}</span><span class="status-badge ${statusTone(lead.stage)}">${stageLabel(lead.stage)}</span></div><p class="card-evidence">${esc(lead.evidence)}</p><div class="card-footer"><select class="status-select" data-lead-stage="${lead.id}" aria-label="Etapa de ${esc(lead.name)}">${LEAD_STAGES.map(([id, label]) => `<option value="${id}" ${id === lead.stage ? 'selected' : ''}>${label}</option>`).join('')}</select>${count ? `<span class="lead-response-deadline"><small>Prazo para resposta</small><strong data-countdown-date="${esc(lead.responseDue || '')}" data-countdown-tone="plain">${count.text}</strong></span>` : '<span class="lead-response-deadline empty">Sem prazo de resposta</span>'}<a class="maps-link" href="${esc(mapsSearchUrl(lead))}" target="_blank" rel="noopener noreferrer" aria-label="Pesquisar ${esc(lead.name)} no Google Maps">Ver no Maps ↗</a><button class="detail-link" data-lead-id="${lead.id}">Abrir →</button></div>${message ? `<div class="row-meta" style="margin-top:12px">${message.sentAt ? 'Contato confirmado manualmente' : 'Mensagem pronta para revisão'}</div>` : ''}</article>`;
 }
 
 function renderProjects() {
@@ -743,7 +773,7 @@ function autoImportProspectingRuns() {
         state.leads.unshift({
           id:uid('lead'), name:item.name, category:item.category, city:item.city, phone:item.phone || '',
           website:'Não encontrado', websiteUrl:'',
-          maps:'Encontrado', mapsUrl, mapsRating:Number(item.mapsRating), mapsReviewCount:Number(item.mapsReviewCount), instagramUrl:safeUrl(item.instagramUrl), instagramStatus:'Não verificado',
+          maps:'Encontrado', mapsUrl, mapsRating:Number(item.mapsRating), mapsReviewCount:Number(item.mapsReviewCount), instagramUrl:safeUrl(item.instagramUrl), instagramStatus:['Encontrado','Não encontrado'].includes(item.instagramStatus) ? item.instagramStatus : (item.instagramUrl ? 'Encontrado' : 'Não verificado'), instagramActivity:INSTAGRAM_ACTIVITY_STATUSES.includes(item.instagramActivity) ? item.instagramActivity : 'Não verificado', instagramActivityEvidence:item.instagramActivityEvidence || '', instagramCheckedAt:item.instagramCheckedAt || '',
           heat:50, heatRationale:'Calor neutro; pesquisa ainda precisa de revisão.', stage:'verificar', evidence:item.evidence || 'Pesquisa pública inicial; conferir a ficha e os canais antes de qualificar.',
           source:item.source || 'Pesquisa pública assistida pelo Codex', sourceUrl:safeUrl(item.sourceUrl) || mapsUrl,
           nextAction:'Conferir ficha direta do Maps, site e Instagram antes de qualificar.',
@@ -761,7 +791,7 @@ function autoImportProspectingRuns() {
     const ready = (run.candidates || []).filter(item => item.name && item.city && item.message && item.salesScript && item.website === 'Não encontrado' && item.smallLocalBusiness === true && item.maps === 'Encontrado' && Number(item.mapsRating) > 0 && Number(item.mapsReviewCount) > 0 && !/\/maps\/search\//i.test(item.mapsUrl || '') && !existing.has(`${importKey(item.name)}|${importKey(item.city)}`));
     for (const item of ready) {
       const mapsUrl = safeUrl(item.mapsUrl) || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${item.name} ${item.city}`)}`;
-      const lead = { id:uid('lead'),name:item.name,category:item.category,city:item.city,phone:item.phone||'',website:item.website||'Não verificado',websiteUrl:safeUrl(item.websiteUrl),maps:item.maps==='Não encontrado'?'Não encontrado':'Não verificado',mapsUrl,instagramUrl:safeUrl(item.instagramUrl),instagramStatus:item.instagramStatus||'Não verificado',heat:Number(item.heat)||30,heatRationale:item.heatRationale||'',stage:'aprovacao',evidence:item.evidence||'',source:'Pesquisa pública assistida pelo Codex',sourceUrl:safeUrl(item.sourceUrl)||mapsUrl,nextAction:'Revisar a mensagem e o roteiro antes de enviar',salesScript:item.salesScript,notes:'Importado automaticamente pelo fluxo local do Codex; confira os dados e links.',responseDue:null,createdAt:isoDate(Date.now()),demo:false };
+      const lead = { id:uid('lead'),name:item.name,category:item.category,city:item.city,phone:item.phone||'',website:item.website||'Não verificado',websiteUrl:safeUrl(item.websiteUrl),maps:MAPS_STATUSES.includes(item.maps) ? item.maps : 'Não verificado',mapsUrl,instagramUrl:safeUrl(item.instagramUrl),instagramStatus:['Encontrado','Não encontrado'].includes(item.instagramStatus) ? item.instagramStatus : (item.instagramUrl ? 'Encontrado' : 'Não verificado'),instagramActivity:INSTAGRAM_ACTIVITY_STATUSES.includes(item.instagramActivity) ? item.instagramActivity : 'Não verificado',instagramActivityEvidence:item.instagramActivityEvidence||'',instagramCheckedAt:item.instagramCheckedAt||'',heat:Number(item.heat)||30,heatRationale:item.heatRationale||'',stage:'aprovacao',evidence:item.evidence||'',source:'Pesquisa pública assistida pelo Codex',sourceUrl:safeUrl(item.sourceUrl)||mapsUrl,nextAction:'Revisar a mensagem e o roteiro antes de enviar',salesScript:item.salesScript,notes:'Importado automaticamente pelo fluxo local do Codex; confira os dados e links.',responseDue:null,createdAt:isoDate(Date.now()),demo:false };
       state.leads.unshift(lead);
       state.messages.unshift({id:uid('message'),leadId:lead.id,text:item.message,sentAt:null});
       existing.add(`${importKey(lead.name)}|${importKey(lead.city)}`); changed=true;
@@ -790,13 +820,13 @@ function autoImportProspectingRuns() {
         const mapsUrl = safeUrl(item.mapsUrl) || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${item.name} ${item.city}`)}`;
         const website = 'Não encontrado';
         const maps = 'Encontrado';
-        const instagramStatus = ['Encontrado', 'Não encontrado'].includes(item.instagramStatus) ? item.instagramStatus : 'Não verificado';
+        const instagramStatus = ['Encontrado', 'Não encontrado'].includes(item.instagramStatus) ? item.instagramStatus : (safeUrl(item.instagramUrl) ? 'Encontrado' : 'Não verificado');
         const researchEvidence = researched.find(source => `${importKey(source.name)}|${importKey(source.city)}` === key)?.evidence;
         const evidence = [researchEvidence, item.evidence].filter(Boolean).join(' ');
         state.leads.unshift({
           id:uid('lead'), name:item.name, category:item.category || 'Não informado', city:item.city,
           phone:item.phone || '', website, websiteUrl:'', maps, mapsUrl, mapsRating:Number(item.mapsRating), mapsReviewCount:Number(item.mapsReviewCount),
-          instagramUrl:safeUrl(item.instagramUrl), instagramStatus, heat:50, heatRationale:'Calor neutro; ainda não qualificado para contato.',
+          instagramUrl:safeUrl(item.instagramUrl), instagramStatus, instagramActivity:INSTAGRAM_ACTIVITY_STATUSES.includes(item.instagramActivity) ? item.instagramActivity : 'Não verificado', instagramActivityEvidence:item.instagramActivityEvidence || '', instagramCheckedAt:item.instagramCheckedAt || '', heat:50, heatRationale:'Calor neutro; ainda não qualificado para contato.',
           stage:'verificar', evidence, source:'Pesquisa pública assistida pelo Codex', sourceUrl:safeUrl(item.sourceUrl) || mapsUrl,
           nextAction:'Conferir a ficha direta do Maps, site e Instagram antes de qualificar.',
           salesScript:'', notes:'Identidade confirmada em fontes públicas. Link do Maps pode ser apenas uma busca; revise ficha, canais e dados antes de qualquer contato.',
@@ -851,8 +881,26 @@ function initialWhatsAppMessage(lead) {
 
 function modal(content, className = '') { el('#modal-root').innerHTML = `<div class="modal-backdrop open" data-close-modal><div class="modal ${className}" role="dialog" aria-modal="true">${content}</div></div>`; el('[data-close-modal]')?.addEventListener('click', (event) => { if (event.target === event.currentTarget) closeModal(); }); el('[data-modal-close]')?.addEventListener('click', closeModal); }
 function closeModal() { el('#modal-root').innerHTML = ''; }
-function openLeadModal() { modal(`<div class="modal-header"><div><p class="page-kicker">Novo registro</p><h2>Cadastrar lead</h2><p>A empresa pode ter vindo de uma consulta manual no Google Maps.</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><form id="lead-form"><div class="form-grid"><label class="field"><span>Nome da empresa *</span><input class="field-input" name="name" required placeholder="Ex.: Studio Aquarela" /></label><label class="field"><span>Nicho *</span><input class="field-input" name="category" required placeholder="Ex.: manicure e salão" /></label><label class="field"><span>Cidade / região *</span><input class="field-input" name="city" required placeholder="Ex.: São Carlos, SP" /></label><label class="field"><span>Telefone / WhatsApp com DDD</span><input class="field-input" name="phone" inputmode="tel" autocomplete="tel" placeholder="Ex.: (16) 99999-9999" /></label><label class="field"><span>Site identificado</span><select class="field-select" name="website"><option>Não verificado</option><option>Não encontrado</option><option>Encontrado</option></select></label><label class="field"><span>Cadastro no Maps</span><select class="field-select" name="maps"><option>Não verificado</option><option>Não encontrado</option><option>Cadastro incompleto</option><option>Cadastro regular</option><option>Cadastro forte</option></select></label><label class="field full"><span>Calor inicial do lead</span><span class="range-wrap"><input class="heat-range" type="range" name="heat" min="0" max="100" value="50" /><strong class="range-value" id="modal-heat-value">50/100</strong></span></label><label class="field full"><span>Evidência observável</span><textarea class="field-textarea" name="evidence" required placeholder="O que foi observado no site, Maps ou presença digital?"></textarea></label><label class="field full"><span>Próxima ação / notas</span><textarea class="field-textarea" name="notes" placeholder="Ex.: confirmar se atende por agendamento."></textarea></label></div><div class="modal-actions"><button type="button" class="ghost-btn" data-modal-close>Cancelar</button><button class="primary-btn" type="submit">Salvar lead</button></div></form>`); el('#lead-form').addEventListener('submit', saveLead); el('.heat-range').addEventListener('input', (event) => { el('#modal-heat-value').textContent = `${event.target.value}/100`; }); }
-function saveLead(event) { event.preventDefault(); const form = new FormData(event.target); const lead = { id: uid('lead'), name: form.get('name'), category: form.get('category'), city: form.get('city'), phone: form.get('phone'), website: form.get('website'), websiteUrl: '', maps: form.get('maps'), mapsUrl: '', instagramUrl: '', instagramStatus: 'Não verificado', heat: Number(form.get('heat')), stage: 'novo', evidence: form.get('evidence'), source: 'Google Maps · consulta manual', notes: form.get('notes'), nextAction: 'Verificar e qualificar', responseDue: null, createdAt: isoDate(Date.now()), demo: false }; state.leads.unshift(lead); state.messages.unshift({ id: uid('message'), leadId: lead.id, text: initialWhatsAppMessage(lead), sentAt: null }); state.settings.demo = false; persist(); currentLeadId = lead.id; closeModal(); toast('Lead cadastrado e mensagem inicial preparada.'); renderPages(); }
+function openLeadModal() { modal(`<div class="modal-header"><div><p class="page-kicker">Novo registro</p><h2>Cadastrar lead</h2><p>Registre o que foi conferido em site, Google Maps e Instagram. Deixe como “Não verificado” quando não tiver certeza.</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><form id="lead-form"><div class="form-grid"><label class="field"><span>Nome da empresa *</span><input class="field-input" name="name" required placeholder="Ex.: Studio Aquarela" /></label><label class="field"><span>Nicho *</span><input class="field-input" name="category" required placeholder="Ex.: manicure e salão" /></label><label class="field"><span>Cidade / região *</span><input class="field-input" name="city" required placeholder="Ex.: São Carlos, SP" /></label><label class="field"><span>Telefone / WhatsApp com DDD</span><input class="field-input" name="phone" inputmode="tel" autocomplete="tel" placeholder="Ex.: (16) 99999-9999" /></label><label class="field"><span>Site identificado</span><select class="field-select" name="website"><option>Não verificado</option><option>Não encontrado</option><option>Encontrado</option></select></label><label class="field"><span>Link do site</span><input class="field-input" name="websiteUrl" inputmode="url" placeholder="https://..." /></label><label class="field"><span>Ficha no Google Maps</span><select class="field-select" name="maps"><option>Não verificado</option><option>Encontrado</option><option>Não encontrado</option><option>Cadastro incompleto</option><option>Cadastro regular</option><option>Cadastro forte</option></select></label><label class="field"><span>Link direto do Maps</span><input class="field-input" name="mapsUrl" inputmode="url" placeholder="https://maps.google.com/..." /></label><label class="field"><span>Perfil do Instagram</span><select class="field-select" name="instagramStatus"><option>Não verificado</option><option>Encontrado</option><option>Não encontrado</option></select></label><label class="field"><span>Link do Instagram</span><input class="field-input" name="instagramUrl" inputmode="url" placeholder="https://instagram.com/..." /></label><label class="field"><span>Atividade no Instagram</span><select class="field-select" name="instagramActivity">${INSTAGRAM_ACTIVITY_STATUSES.map((status) => `<option>${esc(status)}</option>`).join('')}</select><small class="field-help">Considere ativo quando houver publicação pública nos últimos 90 dias.</small></label><label class="field"><span>Evidência da atividade</span><input class="field-input" name="instagramActivityEvidence" placeholder="Ex.: publicação de 12/10/2026" /></label><label class="field full"><span>Calor inicial do lead</span><span class="range-wrap"><input class="heat-range" type="range" name="heat" min="0" max="100" value="50" /><strong class="range-value" id="modal-heat-value">50/100</strong></span></label><label class="field full"><span>Evidência observável</span><textarea class="field-textarea" name="evidence" required placeholder="Fontes consultadas, links e o que ainda falta confirmar."></textarea></label><label class="field full"><span>Próxima ação / notas</span><textarea class="field-textarea" name="notes" placeholder="Ex.: confirmar se atende por agendamento."></textarea></label></div><div class="modal-actions"><button type="button" class="ghost-btn" data-modal-close>Cancelar</button><button class="primary-btn" type="submit">Salvar lead</button></div></form>`); el('#lead-form').addEventListener('submit', saveLead); el('.heat-range').addEventListener('input', (event) => { el('#modal-heat-value').textContent = `${event.target.value}/100`; }); }
+function saveLead(event) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const urls = Object.fromEntries(['websiteUrl', 'mapsUrl', 'instagramUrl'].map((key) => [key, String(form.get(key) || '').trim()]));
+  if (Object.values(urls).some((value) => value && !safeUrl(value))) { toast('Confira os links. Use um endereço válido, como https://exemplo.com.'); return; }
+  const websiteUrl = safeUrl(urls.websiteUrl);
+  const instagramUrl = safeUrl(urls.instagramUrl);
+  const lead = {
+    id: uid('lead'), name: String(form.get('name')).trim(), category: String(form.get('category')).trim(), city: String(form.get('city')).trim(), phone: String(form.get('phone') || '').trim(),
+    website: websiteUrl ? 'Encontrado' : String(form.get('website')), websiteUrl, maps: String(form.get('maps')), mapsUrl: safeUrl(urls.mapsUrl),
+    instagramUrl, instagramStatus: instagramUrl ? 'Encontrado' : String(form.get('instagramStatus')), instagramActivity: String(form.get('instagramActivity') || 'Não verificado'),
+    instagramActivityEvidence: String(form.get('instagramActivityEvidence') || '').trim(), instagramCheckedAt: INSTAGRAM_ACTIVITY_STATUSES.includes(String(form.get('instagramActivity'))) && String(form.get('instagramActivity')) !== 'Não verificado' ? isoDate(Date.now()) : '', heat: Number(form.get('heat')), stage: 'novo',
+    evidence: String(form.get('evidence') || '').trim(), source: 'Pesquisa/checagem manual', notes: String(form.get('notes') || '').trim(), nextAction: 'Conferir site, ficha do Maps e atividade do Instagram', responseDue: null, createdAt: isoDate(Date.now()), demo: false
+  };
+  if (lead.instagramStatus === 'Não encontrado') lead.instagramActivity = 'Não se aplica · perfil não encontrado';
+  state.leads.unshift(lead);
+  state.messages.unshift({ id: uid('message'), leadId: lead.id, text: initialWhatsAppMessage(lead), sentAt: null });
+  state.settings.demo = false; persist(); currentLeadId = lead.id; closeModal(); toast('Lead cadastrado com os campos de site, Maps e Instagram para revisão.'); renderPages();
+}
 function importKey(value) { return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
 function openCRMJsonImportModal() {
   modal(`<div class="modal-header"><div><p class="page-kicker">Importação em lote</p><h2>Colar ou escolher JSON</h2><p>Os leads serão acrescentados ao mesmo CRM, tanto pela Prospecção quanto pela aba Agentes.</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><label class="field json-paste-field"><span>Cole o conteúdo do JSON</span><textarea class="field-textarea json-paste-area" id="crm-json-paste" placeholder='Cole aqui um array de empresas ou um objeto com "leads": [...]' spellcheck="false"></textarea></label><div class="json-import-actions"><button class="primary-btn" type="button" data-action="import-pasted-json">Importar conteúdo colado</button><label class="ghost-btn json-file-button">Escolher arquivo .json<input id="crm-json-file" type="file" accept=".json,application/json" /></label></div><p class="modal-note">Aceita de 1 a 250 leads. Registros com o mesmo nome e cidade são ignorados como duplicados.</p>`);
@@ -895,7 +943,7 @@ async function importCRMJsonFile(event) {
         continue;
       }
       const websiteOptions = ['Não verificado', 'Não encontrado', 'Encontrado'];
-      const mapsOptions = ['Não verificado', 'Não encontrado', 'Cadastro incompleto', 'Cadastro regular', 'Cadastro forte'];
+        const mapsOptions = MAPS_STATUSES;
       const heat = Number(item.heat);
       const stage = LEAD_STAGES.some(([id]) => id === item.stage) ? item.stage : 'novo';
       const lead = {
@@ -903,6 +951,8 @@ async function importCRMJsonFile(event) {
         phone: String(item.phone || '').trim(), website: websiteOptions.includes(item.website) ? item.website : 'Não verificado',
         websiteUrl: safeUrl(item.websiteUrl || item.websiteLink || ''), mapsUrl: safeUrl(item.mapsUrl || item.googleMapsUrl || ''), instagramUrl: safeUrl(item.instagramUrl || ''),
         instagramStatus: ['Não verificado', 'Encontrado', 'Não encontrado'].includes(item.instagramStatus) ? item.instagramStatus : (item.instagramUrl ? 'Encontrado' : 'Não verificado'),
+        instagramActivity: INSTAGRAM_ACTIVITY_STATUSES.includes(item.instagramActivity) ? item.instagramActivity : 'Não verificado',
+        instagramActivityEvidence: String(item.instagramActivityEvidence || ''), instagramCheckedAt: String(item.instagramCheckedAt || ''),
         maps: mapsOptions.includes(item.maps) ? item.maps : 'Não verificado', heat: Number.isFinite(heat) ? Math.max(0, Math.min(100, Math.round(heat))) : 50,
         stage, evidence: String(item.evidence || 'Importado de um arquivo JSON; confirmar as informações antes do contato.').trim(),
         source: String(item.source || 'Importação JSON').trim(), sourceUrl: String(item.sourceUrl || '').trim(), notes: String(item.notes || '').trim(),
@@ -910,6 +960,7 @@ async function importCRMJsonFile(event) {
         salesScript: String(item.salesScript || ''), responseDue: Number.isNaN(Date.parse(item.responseDue)) ? null : item.responseDue,
         createdAt: Number.isNaN(Date.parse(item.createdAt)) ? isoDate(Date.now()) : item.createdAt, demo: false
       };
+      if (lead.instagramStatus === 'Não encontrado') lead.instagramActivity = 'Não se aplica · perfil não encontrado';
       added.push(lead);
       sourceForAdded.set(lead.id, item);
       known.set(key, lead);
@@ -964,6 +1015,7 @@ function openLeadDetail(id) {
   if (!lead) return;
   const message = messageByLead(id);
   const instagramStatus = lead.instagramStatus || (lead.instagramUrl ? 'Encontrado' : 'Não verificado');
+  const instagramActivity = lead.instagramActivity || 'Não verificado';
   const project = state.projects.find((item) => item.leadId === lead.id || String(item.name || '').trim().toLocaleLowerCase('pt-BR') === lead.name.trim().toLocaleLowerCase('pt-BR'));
   const links = [
     ['Google Maps', mapsSearchUrl(lead)],
@@ -985,17 +1037,19 @@ function openLeadDetail(id) {
     <h3 class="detail-section-title">Presença digital</h3><div class="form-grid">
       <label class="field"><span>Site: o que você verificou?</span><select class="field-select" name="website"><option ${lead.website === 'Não verificado' ? 'selected' : ''}>Não verificado</option><option ${lead.website === 'Não encontrado' ? 'selected' : ''}>Não encontrado</option><option ${lead.website === 'Encontrado' ? 'selected' : ''}>Encontrado</option></select></label>
       <label class="field"><span>Endereço do site</span><input class="field-input" name="websiteUrl" inputmode="url" placeholder="https://..." value="${esc(lead.websiteUrl || '')}" /></label>
-      <label class="field"><span>Cadastro no Google Maps</span><select class="field-select" name="maps"><option ${lead.maps === 'Não verificado' ? 'selected' : ''}>Não verificado</option><option ${lead.maps === 'Não encontrado' ? 'selected' : ''}>Não encontrado</option><option ${lead.maps === 'Cadastro incompleto' ? 'selected' : ''}>Cadastro incompleto</option><option ${lead.maps === 'Cadastro regular' ? 'selected' : ''}>Cadastro regular</option><option ${lead.maps === 'Cadastro forte' ? 'selected' : ''}>Cadastro forte</option></select></label>
+      <label class="field"><span>Ficha no Google Maps</span><select class="field-select" name="maps">${MAPS_STATUSES.map((status) => `<option ${lead.maps === status ? 'selected' : ''}>${esc(status)}</option>`).join('')}</select></label>
       <label class="field"><span>Link da ficha do Maps</span><input class="field-input" name="mapsUrl" inputmode="url" placeholder="https://maps.google.com/..." value="${esc(lead.mapsUrl || '')}" /></label>
       <label class="field"><span>Instagram: o que você encontrou?</span><select class="field-select" name="instagramStatus"><option ${instagramStatus === 'Não verificado' ? 'selected' : ''}>Não verificado</option><option ${instagramStatus === 'Encontrado' ? 'selected' : ''}>Encontrado</option><option ${instagramStatus === 'Não encontrado' ? 'selected' : ''}>Não encontrado</option></select></label>
       <label class="field"><span>Link do Instagram</span><input class="field-input" name="instagramUrl" inputmode="url" placeholder="https://instagram.com/..." value="${esc(lead.instagramUrl || '')}" /></label>
+      <label class="field"><span>Atividade do Instagram</span><select class="field-select" name="instagramActivity">${INSTAGRAM_ACTIVITY_STATUSES.map((status) => `<option ${instagramActivity === status ? 'selected' : ''}>${esc(status)}</option>`).join('')}</select><small class="field-help">“Ativo” significa publicação pública nos últimos 90 dias; use “Não foi possível confirmar” quando o perfil estiver inacessível.</small></label>
+      <label class="field"><span>Evidência da atividade</span><input class="field-input" name="instagramActivityEvidence" placeholder="Ex.: publicação de 12/10/2026" value="${esc(lead.instagramActivityEvidence || '')}" /></label>
     </div>
     <h3 class="detail-section-title">Acompanhamento</h3><div class="form-grid">
       <label class="field full"><span>O que você encontrou</span><textarea class="field-textarea" name="evidence">${esc(lead.evidence || '')}</textarea></label>
       <label class="field full"><span>Próxima ação</span><input class="field-input" name="nextAction" value="${esc(lead.nextAction || '')}" placeholder="Ex.: enviar mensagem" /></label>
       <label class="field full"><span>Roteiro da conversa</span><textarea class="field-textarea" name="salesScript" placeholder="Perguntas e respostas sugeridas para a conversa">${esc(lead.salesScript || '')}</textarea><small class="field-help">Sugestão para você adaptar. O painel não conversa nem envia mensagens automaticamente.</small></label>
       <label class="field full"><span>Notas</span><textarea class="field-textarea" name="notes">${esc(lead.notes || '')}</textarea></label>
-    </div></section><aside class="lead-workflow">${renderLeadWorkflow(lead, message, project, instagramStatus)}</aside></div>
+    </div></section><aside class="lead-workflow">${renderLeadWorkflow(lead, message, project, instagramStatus, instagramActivity)}</aside></div>
     <div class="modal-actions lead-edit-actions"><button type="button" class="danger-btn" data-delete-lead="${esc(lead.id)}">Excluir cliente</button><span class="action-spacer"></span><button type="button" class="ghost-btn" data-modal-close>Fechar</button>${message ? `<button type="button" class="ghost-btn" data-go-messages="${esc(lead.id)}">Abrir conversa</button>` : ''}<button class="primary-btn" type="submit">Salvar alterações</button></div></form>`, 'modal-lead-detail');
   el('#edit-lead-form').addEventListener('submit', saveLeadDetails);
   el('#edit-lead-form [name="heat"]').addEventListener('input', (event) => { el('#edit-heat-value').textContent = `${event.target.value}/100`; });
@@ -1010,11 +1064,12 @@ function openLeadDetail(id) {
   all('[data-flow-project-stage]').forEach((button) => button.addEventListener('click', () => { if (!project) return; project.stage = button.dataset.flowProjectStage; persist(); openLeadDetail(id); toast(`Projeto avançou para: ${stageLabel(project.stage, PROJECT_STAGES)}.`); }));
 }
 
-function renderLeadWorkflow(lead, message, project, instagramStatus) {
+function renderLeadWorkflow(lead, message, project, instagramStatus, instagramActivity) {
   const checks = [
     { key: 'website', label: 'Conferir se tem site', done: lead.website !== 'Não verificado', result: lead.website === 'Encontrado' ? 'Site cadastrado' : lead.website === 'Não encontrado' ? 'Nenhum site cadastrado' : '', button: 'Registrar resultado' },
     { key: 'maps', label: 'Revisar perfil no Google Maps', done: lead.maps !== 'Não verificado', result: lead.maps === 'Não verificado' ? '' : lead.maps, button: 'Registrar resultado' },
-    { key: 'instagramStatus', label: 'Conferir Instagram', done: instagramStatus !== 'Não verificado', result: instagramStatus === 'Encontrado' ? 'Perfil encontrado' : instagramStatus === 'Não encontrado' ? 'Não localizado' : '', button: 'Registrar resultado' }
+    { key: 'instagramStatus', label: 'Conferir perfil do Instagram', done: instagramStatus !== 'Não verificado', result: instagramStatus === 'Encontrado' ? 'Perfil encontrado' : instagramStatus === 'Não encontrado' ? 'Não localizado' : '', button: 'Registrar resultado' },
+    { key: 'instagramActivity', label: 'Conferir atividade do Instagram', done: instagramActivity !== 'Não verificado', result: instagramActivityLabel(instagramActivity), button: 'Registrar atividade' }
   ];
   const incomplete = checks.find((item) => !item.done);
   const checkRows = checks.map((item) => `<div class="flow-check ${item.done ? 'complete' : incomplete?.key === item.key ? 'current' : ''}"><span class="flow-marker">${item.done ? '✓' : incomplete?.key === item.key ? '●' : '·'}</span><div class="flow-check-copy"><strong>${item.label}</strong><small>${item.done ? esc(item.result) : 'Ainda falta conferir'}</small></div>${item.key === 'maps' ? `<a class="flow-mini-link" href="${esc(mapsSearchUrl(lead))}" target="_blank" rel="noopener noreferrer">Abrir Maps</a>` : item.key === 'instagramStatus' ? `<a class="flow-mini-link" href="${esc(safeUrl(lead.instagramUrl) || instagramSearchUrl(lead))}" target="_blank" rel="noopener noreferrer">${lead.instagramUrl ? 'Abrir perfil' : 'Pesquisar'}</a>` : ''}${!item.done ? `<button type="button" class="flow-edit-link" data-focus-field="${item.key}">${item.button}</button>` : ''}</div>`).join('');
@@ -1024,7 +1079,7 @@ function renderLeadWorkflow(lead, message, project, instagramStatus) {
   if (incomplete) {
     nextTitle = incomplete.label;
     nextText = 'Confira este ponto e registre o resultado na ficha para avançar.';
-    nextAction = `<button type="button" class="flow-primary" data-focus-field="${incomplete.key}">Atualizar ${incomplete.key === 'website' ? 'site' : incomplete.key === 'maps' ? 'Maps' : 'Instagram'}</button>`;
+    nextAction = `<button type="button" class="flow-primary" data-focus-field="${incomplete.key}">Atualizar ${incomplete.key === 'website' ? 'site' : incomplete.key === 'maps' ? 'Maps' : incomplete.key === 'instagramActivity' ? 'atividade do Instagram' : 'Instagram'}</button>`;
   } else if (['novo', 'verificar'].includes(lead.stage)) {
     nextTitle = 'Qualificar a empresa'; nextText = 'Revise as informações e confirme se vale iniciar o contato.'; nextAction = '<button type="button" class="flow-primary" data-flow-stage="qualificado">Marcar como qualificada</button>';
   } else if (lead.stage === 'qualificado') {
@@ -1089,6 +1144,10 @@ function saveLeadDetails(event) {
   lead.mapsUrl = safeUrl(mapsUrl);
   lead.instagramUrl = safeUrl(instagramUrl);
   lead.instagramStatus = lead.instagramUrl ? 'Encontrado' : String(form.get('instagramStatus'));
+  lead.instagramActivity = INSTAGRAM_ACTIVITY_STATUSES.includes(String(form.get('instagramActivity'))) ? String(form.get('instagramActivity')) : 'Não verificado';
+  if (lead.instagramStatus === 'Não encontrado') lead.instagramActivity = 'Não se aplica · perfil não encontrado';
+  lead.instagramActivityEvidence = String(form.get('instagramActivityEvidence') || '').trim();
+  lead.instagramCheckedAt = lead.instagramActivity !== 'Não verificado' ? (lead.instagramCheckedAt || isoDate(Date.now())) : '';
   lead.heat = Math.max(0, Math.min(100, Number(form.get('heat')) || 0));
   const previousStage = lead.stage;
   const nextStage = String(form.get('stage'));
