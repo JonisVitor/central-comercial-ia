@@ -324,7 +324,7 @@ function renderAssistant() {
   </div>`;
   root.querySelector('[data-assistant-toggle]')?.addEventListener('click', () => { assistantOpen = !assistantOpen; renderAssistant(); if (assistantOpen) el('#assistant-input')?.focus(); });
   root.querySelector('[data-assistant-close]')?.addEventListener('click', () => { assistantOpen = false; renderAssistant(); });
-  root.querySelector('[data-assistant-suggestion]')?.addEventListener('click', (event) => sendAssistantMessage(event.currentTarget.dataset.assistantSuggestion));
+  root.querySelectorAll('[data-assistant-suggestion]').forEach((button) => button.addEventListener('click', (event) => sendAssistantMessage(event.currentTarget.dataset.assistantSuggestion)));
   root.querySelector('[data-assistant-form]')?.addEventListener('submit', (event) => { event.preventDefault(); sendAssistantMessage(el('#assistant-input')?.value || ''); });
   root.querySelector('#assistant-input')?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
