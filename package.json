@@ -1,10 +1,11 @@
 {
   "name": "central-comercial-ia",
   "private": true,
-  "version": "0.6.31",
+  "version": "0.6.32",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "powershell -NoProfile -ExecutionPolicy Bypass -File ./start-local.ps1",
+    "start:local": "powershell -NoProfile -ExecutionPolicy Bypass -File ./start-local.ps1",
     "agents-runtime": "node agents-runtime/server.mjs",
     "build": "vite build",
     "preview": "vite preview"

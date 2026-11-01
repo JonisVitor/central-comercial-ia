@@ -10,14 +10,14 @@ As chamadas usam a conta autenticada no Codex CLI. Não configuramos chave de AP
 
 ## Iniciar no Windows
 
-1. Abra o **Windows PowerShell ou Windows Terminal pelo menu Iniciar**, fora do terminal integrado do Codex.
-2. Navegue até a pasta `central-comercial-ia`.
-3. Em uma janela, rode `npm run dev` e abra `http://127.0.0.1:4175`.
-4. Em outra janela, rode `npm run agents-runtime`.
-   - O executor precisa iniciar o Codex CLI como um processo local. Se for iniciado dentro de um sandbox que bloqueia subprocessos, o chat mostra `spawn EPERM`; rode este comando numa janela normal do Windows.
-5. No painel, abra **Agentes**. O indicador deve mostrar **Codex local conectado**.
-6. No painel Cloudflare, use **Exportar dados** para baixar o JSON.
-7. No app local, abra **Agentes** → **Importar JSON**, selecione o arquivo exportado e clique **Executar agentes**.
+1. Dê dois cliques em `START-LOCAL.cmd` nesta pasta.
+2. O inicializador reutiliza serviços que já estejam ativos; se necessário, abre uma janela do Windows para o executor Codex e outra para o painel.
+3. Quando ambos responderem, o navegador abre `http://127.0.0.1:4175/` automaticamente.
+4. No painel, abra **Agentes**. O indicador deve mostrar **Codex local conectado**.
+5. No painel Cloudflare, use **Exportar dados** para baixar o JSON.
+6. No app local, abra **Agentes** → **Importar JSON**, selecione o arquivo exportado e clique **Executar agentes**.
+
+Também é possível iniciar pelo terminal do Windows, nesta pasta, com `npm run start:local`. Se o executor retornar `spawn EPERM`, feche as janelas desse projeto e use `START-LOCAL.cmd` pelo Explorador de Arquivos; terminais integrados com sandbox podem bloquear a criação de subprocessos do Codex CLI.
 
 ## Chat do assistente
 
