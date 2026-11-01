@@ -112,6 +112,7 @@ function loadState() {
       saved.messages = saved.messages.filter((message) => realLeadIds.has(message.leadId));
       saved.settings = { demo: false, theme: 'dark', ...(saved.settings || {}), demo: false };
       ensureLeadDrafts(saved);
+      closeExpiredUnansweredLeads(saved);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
       return saved;
     }
@@ -142,6 +143,26 @@ function ensureLeadDrafts(data) {
     existing.add(lead.id);
   }
 }
+function closeExpiredUnansweredLeads(data, now = Date.now()) {
+  if (!Array.isArray(data?.leads) || !Array.isArray(data?.messages)) return 0;
+  const timeoutMs = 7 * 24 * 60 * 60 * 1000;
+  let closed = 0;
+  for (const lead of data.leads) {
+    if (lead?.stage !== 'contatado') continue;
+    const message = data.messages.find((item) => item.leadId === lead.id);
+    if (!message?.sentAt || message.conversation?.some((item) => item.role === 'cliente')) continue;
+    const sentAtValues = [message.sentAt, ...(message.conversation || []).filter((item) => item.role === 'operador' && item.status === 'enviada').map((item) => item.sentAt)].filter(Boolean).map(Date.parse).filter(Number.isFinite);
+    const lastSentAt = Math.max(...sentAtValues);
+    if (!Number.isFinite(lastSentAt) || now < lastSentAt + timeoutMs) continue;
+    lead.stage = 'perdido';
+    lead.responseDue = null;
+    lead.autoClosedAt = new Date(now).toISOString();
+    lead.autoCloseReason = 'Sem resposta após 7 dias corridos do último envio confirmado.';
+    lead.nextAction = 'Encerrado automaticamente por falta de resposta; histórico preservado.';
+    closed += 1;
+  }
+  return closed;
+}
 async function hydrateRemoteState() {
   if (isLocalHost) return;
   try {
@@ -149,10 +170,12 @@ async function hydrateRemoteState() {
     if (!response.ok) throw new Error(`state_${response.status}`);
     const payload = await response.json();
     const hasRemoteState = Boolean(payload.state);
+    let automaticallyClosed = 0;
     if (hasRemoteState) {
       state = payload.state;
       state.settings = { demo: false, theme: 'dark', ...(state.settings || {}) };
       ensureLeadDrafts(state);
+      automaticallyClosed = closeExpiredUnansweredLeads(state);
       currentLeadId = state.leads[0]?.id;
       currentMessageId = state.messages[0]?.id;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -162,7 +185,10 @@ async function hydrateRemoteState() {
     }
     remoteHydrated = true;
     if (!hasRemoteState) await syncRemoteState();
-    else persist();
+    else {
+      persist();
+      if (automaticallyClosed) toast(`${automaticallyClosed} lead${automaticallyClosed === 1 ? '' : 's'} movido${automaticallyClosed === 1 ? '' : 's'} para Encerrados após 7 dias sem resposta. O histórico foi mantido.`);
+    }
     toast('Dados sincronizados com o Cloudflare.');
   } catch (error) {
     console.warn('Sincronização remota indisponível.', error);
@@ -615,7 +641,7 @@ function messageListStatus(message, lead) {
   const last = message.conversation?.at(-1);
   const stage = lead?.stage;
   if (stage === 'ganho') return { label: 'Venda fechada', className: 'is-won' };
-  if (stage === 'perdido') return { label: 'Conversa encerrada', className: 'is-closed' };
+  if (stage === 'perdido') return { label: lead?.autoClosedAt ? 'Encerrado · sem resposta (7 dias)' : 'Conversa encerrada', className: 'is-closed' };
   if (stage === 'nao-contatar') return { label: 'Não contatar', className: 'is-do-not-contact' };
   if (stage === 'interessado') return { label: 'Lead interessado', className: 'is-interested' };
   if (last?.role === 'cliente') return { label: 'Cliente respondeu · analisar', className: 'has-client-reply' };
@@ -1277,8 +1303,24 @@ applyTheme();
 renderShell();
 renderPages();
 hydrateRemoteState();
+if (isLocalHost) {
+  const automaticallyClosed = closeExpiredUnansweredLeads(state);
+  if (automaticallyClosed) {
+    persist();
+    renderPages();
+    toast(`${automaticallyClosed} lead${automaticallyClosed === 1 ? '' : 's'} movido${automaticallyClosed === 1 ? '' : 's'} para Encerrados após 7 dias sem resposta. O histórico foi mantido.`);
+  }
+}
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 setInterval(refreshLiveCountdowns, 1000);
+setInterval(() => {
+  if (document.visibilityState !== 'visible') return;
+  const automaticallyClosed = closeExpiredUnansweredLeads(state);
+  if (!automaticallyClosed) return;
+  persist();
+  renderPages();
+  toast(`${automaticallyClosed} lead${automaticallyClosed === 1 ? '' : 's'} movido${automaticallyClosed === 1 ? '' : 's'} para Encerrados após 7 dias sem resposta. O histórico foi mantido.`);
+}, 60000);
 setInterval(() => { if (document.visibilityState === 'visible') { if (currentPage === 'overview' || currentPage === 'projects' || currentPage === 'calendar' || currentPage === 'leads') renderPages(); } }, 60000);
 setInterval(() => { if (currentPage === 'agents' && document.visibilityState === 'visible') refreshAgentRuntime(); }, 2500);
 refreshAgentRuntime(false);
