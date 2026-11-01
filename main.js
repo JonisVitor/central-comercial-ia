@@ -32,6 +32,14 @@ const esc = (value = '') => String(value).replace(/[&<>"']/g, (char) => ({ '&': 
 const removeEmojis = (value = '') => String(value).replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, '').replace(/[ \t]{2,}/g, ' ').trim();
 const formatDate = (value) => value ? new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' }).format(new Date(value)).replace('.', '') : '—';
 const formatLongDate = (value) => value ? new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }).format(new Date(value)) : '—';
+const localDateKey = (value) => {
+  if (!value) return '';
+  const date = value instanceof Date ? value : /^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? new Date(`${value}T12:00:00`) : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
+const dateFromLocalKey = (value, hour = 12) => { const [year, month, day] = String(value || '').split('-').map(Number); return year && month && day ? new Date(year, month - 1, day, hour) : null; };
+const addLocalDays = (value, days) => { const date = new Date(value); date.setDate(date.getDate() + days); return date; };
 const toLocalDateTimeInput = (value) => { if (!value) return ''; const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
 const safeUrl = (value = '') => { const raw = String(value).trim(); if (!raw) return ''; try { const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`); return ['http:', 'https:'].includes(url.protocol) ? url.href : ''; } catch { return ''; } };
 const formatAgentResult = (value = '') => esc(value)
@@ -65,6 +73,9 @@ let state = loadState();
 let currentPage = 'overview';
 let currentLeadId = state.leads[0]?.id;
 let currentMessageId = state.messages[0]?.id;
+let calendarCursor = new Date(today().getFullYear(), today().getMonth(), 1);
+let selectedCalendarDate = localDateKey(today());
+let calendarShowCompleted = false;
 let leadFilter = 'ativos';
 let leadSearch = '';
 let remoteHydrated = false;
@@ -100,6 +111,7 @@ function loadState() {
       saved.projects = saved.projects.filter((project) => project.demo !== true && project.demo !== DEMO_MARKER);
       saved.messages = saved.messages.filter((message) => realLeadIds.has(message.leadId));
       saved.settings = { demo: false, theme: 'dark', ...(saved.settings || {}), demo: false };
+      ensureLeadDrafts(saved);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
       return saved;
     }
@@ -114,10 +126,20 @@ function loadAssistantMessages() {
 }
 function saveAssistantMessages() { localStorage.setItem(ASSISTANT_CHAT_STORAGE, JSON.stringify(assistantMessages.slice(-30))); }
 function persist() {
+  ensureLeadDrafts(state);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   if (!isLocalHost && remoteHydrated) {
     clearTimeout(syncTimer);
     syncTimer = setTimeout(syncRemoteState, 250);
+  }
+}
+function ensureLeadDrafts(data) {
+  if (!Array.isArray(data?.leads) || !Array.isArray(data?.messages)) return;
+  const existing = new Set(data.messages.map((message) => message.leadId));
+  for (const lead of data.leads) {
+    if (!lead?.id || existing.has(lead.id) || CLOSED_LEAD_STAGES.includes(lead.stage)) continue;
+    data.messages.push({ id: uid('message'), leadId: lead.id, text: initialWhatsAppMessage(lead), sentAt: null, conversation: [] });
+    existing.add(lead.id);
   }
 }
 async function hydrateRemoteState() {
@@ -130,6 +152,7 @@ async function hydrateRemoteState() {
     if (hasRemoteState) {
       state = payload.state;
       state.settings = { demo: false, theme: 'dark', ...(state.settings || {}) };
+      ensureLeadDrafts(state);
       currentLeadId = state.leads[0]?.id;
       currentMessageId = state.messages[0]?.id;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -139,6 +162,7 @@ async function hydrateRemoteState() {
     }
     remoteHydrated = true;
     if (!hasRemoteState) await syncRemoteState();
+    else persist();
     toast('Dados sincronizados com o Cloudflare.');
   } catch (error) {
     console.warn('Sincronização remota indisponível.', error);
@@ -210,6 +234,7 @@ function renderShell() {
           ${navItem('overview', '⌂', 'Visão geral')}
           ${navItem('leads', '◎', 'Prospecção')}
           ${navItem('projects', '▱', 'Projetos')}
+          ${navItem('calendar', '▦', 'Calendário')}
           ${navItem('messages', '◌', 'Conversas')}
           ${navItem('agents', '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.2"/><path d="M3.8 19v-1.1a5.2 5.2 0 0 1 10.4 0V19zM15.2 14.3a4.1 4.1 0 0 1 5 4V19h-3.2"/></svg>', 'Agentes')}
         </nav></div>
@@ -368,11 +393,12 @@ function renderPages() {
     <section class="page ${currentPage === 'overview' ? 'active' : ''}" data-page-view="overview">${renderOverview()}</section>
     <section class="page ${currentPage === 'leads' ? 'active' : ''}" data-page-view="leads">${renderLeads()}</section>
     <section class="page ${currentPage === 'projects' ? 'active' : ''}" data-page-view="projects">${renderProjects()}</section>
+    <section class="page ${currentPage === 'calendar' ? 'active' : ''}" data-page-view="calendar">${renderCalendar()}</section>
     <section class="page ${currentPage === 'messages' ? 'active' : ''}" data-page-view="messages">${renderMessages()}</section>
     <section class="page ${currentPage === 'agents' ? 'active' : ''}" data-page-view="agents">${renderAgents()}</section>
     <section class="page ${currentPage === 'services' ? 'active' : ''}" data-page-view="services">${renderServices()}</section>
     <section class="page ${currentPage === 'settings' ? 'active' : ''}" data-page-view="settings">${renderSettings()}</section>`;
-  el('#breadcrumb-current').textContent = { overview: 'Visão geral', leads: 'Prospecção', projects: 'Projetos', messages: 'Conversas', agents: 'Agentes', services: 'Serviços', settings: 'Configurações' }[currentPage];
+  el('#breadcrumb-current').textContent = { overview: 'Visão geral', leads: 'Prospecção', projects: 'Projetos', calendar: 'Calendário', messages: 'Conversas', agents: 'Agentes', services: 'Serviços', settings: 'Configurações' }[currentPage];
   bindPageEvents();
 }
 
@@ -427,8 +453,69 @@ function renderLeadCard(lead) {
 
 function renderProjects() {
   return `${pageHeader('Entrega e acompanhamento', 'Cada projeto tem um próximo passo.', 'Mova a etapa com um clique e veja quanto tempo falta em dias corridos — ou em horas quando o prazo apertar.', '<button class="primary-btn" data-action="new-project">+ Novo projeto</button>')}
-    <div class="notice">Os prazos são contados em dias corridos. O relógio atualiza automaticamente e sinaliza quando entra nas últimas 24 horas.</div>
+    <div class="notice">Os prazos são contados em dias corridos. O relógio atualiza automaticamente e sinaliza quando entra nas últimas 24 horas. <button type="button" class="text-btn" data-page="calendar">Abrir calendário de entregas →</button></div>
     <div class="project-grid">${state.projects.length ? state.projects.map(renderProjectCard).join('') : emptyState('Nenhum projeto criado', 'Quando a venda for fechada, crie um projeto para acompanhar a entrega.')}</div>`;
+}
+
+function renderCalendar() {
+  const year = calendarCursor.getFullYear();
+  const month = calendarCursor.getMonth();
+  const monthStart = new Date(year, month, 1);
+  const mondayOffset = (monthStart.getDay() + 6) % 7;
+  const gridStart = new Date(year, month, 1 - mondayOffset);
+  const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+  const visibleProjects = state.projects.filter((project) => project.dueDate && localDateKey(project.dueDate) && (calendarShowCompleted || !['entregue', 'ativo'].includes(project.stage)));
+  const byDate = new Map();
+  for (const project of visibleProjects) {
+    const key = localDateKey(project.dueDate);
+    if (!byDate.has(key)) byDate.set(key, []);
+    byDate.get(key).push(project);
+  }
+  const weekdays = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+  const todayKey = localDateKey(today());
+  const days = Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + index);
+    const key = localDateKey(date);
+    const events = byDate.get(key) || [];
+    const visibleEvents = events.slice(0, 2).map((project) => {
+      const finished = ['entregue', 'ativo'].includes(project.stage);
+      const count = countdown(project.dueDate);
+      const tone = finished ? 'completed' : count.overdue ? 'overdue' : count.urgent ? 'urgent' : '';
+      return `<button type="button" class="calendar-event ${tone}" data-project-id="${esc(project.id)}" title="${esc(project.name)} · ${esc(stageLabel(project.stage, PROJECT_STAGES))}"><strong>${esc(project.name)}</strong><span ${finished ? '' : `data-countdown-date="${esc(project.dueDate)}" data-countdown-tone="deadline"`}>${finished ? 'Concluído' : count.text}</span></button>`;
+    }).join('');
+    const otherMonth = date.getMonth() !== month;
+    return `<div class="calendar-day ${otherMonth ? 'outside-month' : ''} ${key === todayKey ? 'is-today' : ''} ${key === selectedCalendarDate ? 'is-selected' : ''}" aria-label="${new Intl.DateTimeFormat('pt-BR', { dateStyle: 'full' }).format(date)}"><button type="button" class="calendar-day-number" data-calendar-date="${key}" aria-pressed="${key === selectedCalendarDate}">${date.getDate()}</button><div class="calendar-day-events">${visibleEvents}${events.length > 2 ? `<span class="calendar-more">+${events.length - 2} mais</span>` : ''}</div></div>`;
+  }).join('');
+  const selectedEvents = byDate.get(selectedCalendarDate) || [];
+  const monthProjects = visibleProjects.filter((project) => localDateKey(project.dueDate).startsWith(monthKey));
+  const monthOverdue = monthProjects.filter((project) => countdown(project.dueDate).overdue && !['entregue', 'ativo'].includes(project.stage)).length;
+  const withoutDate = state.projects.filter((project) => !project.dueDate && !['entregue', 'ativo'].includes(project.stage));
+  const upcoming = visibleProjects.filter((project) => !['entregue', 'ativo'].includes(project.stage)).sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0, 5);
+  const monthLabel = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(calendarCursor).replace(/^./, (letter) => letter.toLocaleUpperCase('pt-BR'));
+  const selectedDate = dateFromLocalKey(selectedCalendarDate);
+  const selectedLabel = selectedDate ? new Intl.DateTimeFormat('pt-BR', { day: 'numeric', month: 'long' }).format(selectedDate) : '';
+  return `<div class="calendar-page">
+    <div class="calendar-page-heading"><div><h1>Calendário de projetos</h1><p class="lede">Datas de entrega em dias corridos. Alterações nos projetos aparecem aqui automaticamente.</p></div><button class="primary-btn" type="button" data-action="new-project">+ Novo projeto</button></div>
+    <div class="calendar-summary" aria-label="Resumo dos prazos"><span><strong>${monthProjects.length}</strong> entregas neste mês</span><span class="${monthOverdue ? 'calendar-summary-overdue' : ''}"><strong>${monthOverdue}</strong> atrasadas</span><span><strong>${withoutDate.length}</strong> sem data definida</span></div>
+    <div class="calendar-layout">
+      <section class="calendar-panel" aria-label="Calendário mensal">
+        <header class="calendar-toolbar"><div class="calendar-month-controls"><button type="button" class="calendar-nav-btn" data-calendar-month="-1" aria-label="Mês anterior">‹</button><h2>${monthLabel}</h2><button type="button" class="calendar-nav-btn" data-calendar-month="1" aria-label="Próximo mês">›</button><button type="button" class="ghost-btn calendar-today-btn" data-calendar-month="today">Hoje</button></div><label class="calendar-completed-toggle"><input type="checkbox" data-calendar-completed ${calendarShowCompleted ? 'checked' : ''}/> Mostrar concluídos</label></header>
+        <div class="calendar-board"><div class="calendar-weekdays">${weekdays.map((day) => `<span>${day}</span>`).join('')}</div><div class="calendar-grid">${days}</div></div>
+        <p class="calendar-footnote">Cada marcador mostra a etapa atual e o tempo restante. Clique em uma data para filtrar as entregas do dia; clique em um projeto para editar o prazo.</p>
+      </section>
+      <aside class="calendar-side">
+        <section class="calendar-side-section"><div class="calendar-side-heading"><h2>Entregas em ${selectedLabel}</h2><span>${selectedEvents.length}</span></div>${selectedEvents.length ? `<div class="calendar-agenda-list">${selectedEvents.map(renderCalendarProjectRow).join('')}</div>` : `<p class="calendar-empty">Nenhuma entrega prevista para esta data.</p>`}</section>
+        <section class="calendar-side-section"><div class="calendar-side-heading"><h2>Próximos prazos</h2><button type="button" class="text-btn" data-page="projects">Ver projetos →</button></div>${upcoming.length ? `<div class="calendar-agenda-list">${upcoming.map(renderCalendarProjectRow).join('')}</div>` : `<p class="calendar-empty">Nenhum projeto aberto com data definida.</p>`}</section>
+        <section class="calendar-side-section"><div class="calendar-side-heading"><h2>Sem data definida</h2><span>${withoutDate.length}</span></div>${withoutDate.length ? `<div class="calendar-agenda-list">${withoutDate.map((project) => `<button type="button" class="calendar-untimed" data-project-id="${esc(project.id)}"><strong>${esc(project.name)}</strong><span>Definir data de entrega →</span></button>`).join('')}</div>` : `<p class="calendar-empty">Todos os projetos abertos têm uma data cadastrada.</p>`}</section>
+      </aside>
+    </div>
+  </div>`;
+}
+
+function renderCalendarProjectRow(project) {
+  const finished = ['entregue', 'ativo'].includes(project.stage);
+  const count = finished ? { text: 'Concluído', overdue: false, urgent: false } : countdown(project.dueDate);
+  return `<button type="button" class="calendar-agenda-item ${count.overdue ? 'overdue' : count.urgent ? 'urgent' : finished ? 'completed' : ''}" data-project-id="${esc(project.id)}"><span class="calendar-agenda-date">${formatDate(project.dueDate)}</span><span class="calendar-agenda-copy"><strong>${esc(project.name)}</strong><small>${esc(stageLabel(project.stage, PROJECT_STAGES))}</small></span><span class="calendar-agenda-count" ${finished ? '' : `data-countdown-date="${esc(project.dueDate || '')}" data-countdown-tone="deadline"`}>${count.text}</span></button>`;
 }
 
 function renderAgents() {
@@ -552,7 +639,25 @@ function bindPageEvents() {
   all('[data-action="import-crm-json"]').forEach((button) => button.addEventListener('click', openCRMJsonImportModal));
   all('[data-action="maps-task"]').forEach((button) => button.addEventListener('click', () => { assistantOpen = true; renderAssistant(); const input = el('#assistant-input'); if (input) { input.value = 'Pesquise empresas no Google Maps: [nicho] em [cidade, estado]. Traga candidatos com links e evidências para eu revisar.'; input.focus(); input.setSelectionRange(input.value.indexOf('['), input.value.lastIndexOf(']') + 1); } }));
   all('[data-lead-id]').forEach((button) => button.addEventListener('click', (event) => { if (event.target.closest('select')) return; openLeadDetail(button.dataset.leadId); }));
-  all('[data-project-id]').forEach((button) => button.addEventListener('click', () => openProjectDetail(button.dataset.projectId)));
+   all('[data-project-id]').forEach((button) => button.addEventListener('click', (event) => { event.stopPropagation(); openProjectDetail(button.dataset.projectId); }));
+  all('[data-calendar-month]').forEach((button) => button.addEventListener('click', () => {
+    if (button.dataset.calendarMonth === 'today') {
+      calendarCursor = new Date(today().getFullYear(), today().getMonth(), 1);
+      selectedCalendarDate = localDateKey(today());
+    } else {
+      const next = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + Number(button.dataset.calendarMonth), 1);
+      calendarCursor = next;
+      selectedCalendarDate = localDateKey(next);
+    }
+    renderPages();
+  }));
+  all('[data-calendar-date]').forEach((button) => button.addEventListener('click', () => {
+    selectedCalendarDate = button.dataset.calendarDate;
+    const date = dateFromLocalKey(selectedCalendarDate);
+    if (date) calendarCursor = new Date(date.getFullYear(), date.getMonth(), 1);
+    renderPages();
+  }));
+  el('[data-calendar-completed]')?.addEventListener('change', (event) => { calendarShowCompleted = event.target.checked; renderPages(); });
   all('[data-lead-filter]').forEach((button) => button.addEventListener('click', () => { leadFilter = button.dataset.leadFilter; renderPages(); }));
   el('#lead-search')?.addEventListener('input', (event) => { leadSearch = event.target.value; renderPages(); const input = el('#lead-search'); input?.focus(); input?.setSelectionRange(leadSearch.length, leadSearch.length); });
   all('[data-lead-stage]').forEach((select) => select.addEventListener('change', () => updateLeadStage(select.dataset.leadStage, select.value)));
@@ -936,7 +1041,7 @@ function createProjectFromLead(id) {
   const existing = state.projects.find((item) => item.leadId === id || String(item.name || '').trim().toLocaleLowerCase('pt-BR') === lead.name.trim().toLocaleLowerCase('pt-BR'));
   if (existing) { existing.leadId = id; persist(); openLeadDetail(id); return; }
   const start = new Date();
-  state.projects.unshift({ id: uid('project'), leadId: id, name: lead.name, service: 'Landing page + hospedagem anual', stage: 'confirmado', startDate: isoDate(start), dueDate: isoDate(start.getTime() + 7 * 86400000), notes: '', demo: false });
+  state.projects.unshift({ id: uid('project'), leadId: id, name: lead.name, service: 'Landing page + hospedagem anual', stage: 'confirmado', startDate: isoDate(start), dueDate: isoDate(addLocalDays(start, 7)), notes: '', demo: false });
   state.settings.demo = false;
   persist();
   openLeadDetail(id);
@@ -1033,8 +1138,8 @@ function importResearchCandidates(runId) {
   toast(`${added.length} lead${added.length === 1 ? '' : 's'} adicionado${added.length === 1 ? '' : 's'}; ${duplicates} duplicada${duplicates === 1 ? '' : 's'} ignorada${duplicates === 1 ? '' : 's'}.`);
 }
 
-function openProjectModal() { modal(`<div class="modal-header"><div><p class="page-kicker">Novo acompanhamento</p><h2>Criar projeto</h2><p>Use dias corridos para acompanhar a produção.</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><form id="project-form"><div class="form-grid"><label class="field"><span>Nome do projeto *</span><input class="field-input" name="name" required placeholder="Ex.: Studio Aquarela" /></label><label class="field"><span>Serviço</span><input class="field-input" name="service" value="Landing page + hospedagem anual" /></label><label class="field"><span>Data de início *</span><input class="field-input" type="date" name="startDate" value="${new Date().toISOString().slice(0, 10)}" required /></label><label class="field"><span>Prazo em dias corridos *</span><input class="field-input" type="number" name="days" value="7" min="1" max="365" required /></label><label class="field full"><span>Observações</span><textarea class="field-textarea" name="notes" placeholder="Materiais recebidos, escopo, próxima ação..."></textarea></label></div><div class="modal-actions"><button type="button" class="ghost-btn" data-modal-close>Cancelar</button><button class="primary-btn" type="submit">Criar projeto</button></div></form>`); el('#project-form').addEventListener('submit', saveProject); }
-function saveProject(event) { event.preventDefault(); const form = new FormData(event.target); const start = new Date(`${form.get('startDate')}T09:00:00`); const project = { id: uid('project'), leadId: '', name: form.get('name'), service: form.get('service'), stage: 'confirmado', startDate: isoDate(start), dueDate: isoDate(start.getTime() + Number(form.get('days')) * 86400000), notes: form.get('notes'), demo: false }; state.projects.unshift(project); state.settings.demo = false; persist(); closeModal(); toast('Projeto criado com prazo em dias corridos.'); renderPages(); }
+function openProjectModal() { modal(`<div class="modal-header"><div><p class="page-kicker">Novo acompanhamento</p><h2>Criar projeto</h2><p>Use dias corridos para acompanhar a produção.</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><form id="project-form"><div class="form-grid"><label class="field"><span>Nome do projeto *</span><input class="field-input" name="name" required placeholder="Ex.: Studio Aquarela" /></label><label class="field"><span>Serviço</span><input class="field-input" name="service" value="Landing page + hospedagem anual" /></label><label class="field"><span>Data de início *</span><input class="field-input" type="date" name="startDate" value="${localDateKey(today())}" required /></label><label class="field"><span>Prazo em dias corridos *</span><input class="field-input" type="number" name="days" value="7" min="1" max="365" required /></label><label class="field full"><span>Observações</span><textarea class="field-textarea" name="notes" placeholder="Materiais recebidos, escopo, próxima ação..."></textarea></label></div><div class="modal-actions"><button type="button" class="ghost-btn" data-modal-close>Cancelar</button><button class="primary-btn" type="submit">Criar projeto</button></div></form>`); el('#project-form').addEventListener('submit', saveProject); }
+function saveProject(event) { event.preventDefault(); const form = new FormData(event.target); const start = new Date(`${form.get('startDate')}T09:00:00`); const project = { id: uid('project'), leadId: '', name: form.get('name'), service: form.get('service'), stage: 'confirmado', startDate: isoDate(start), dueDate: isoDate(addLocalDays(start, Number(form.get('days')))), notes: form.get('notes'), demo: false }; state.projects.unshift(project); state.settings.demo = false; persist(); closeModal(); toast('Projeto criado com prazo em dias corridos.'); renderPages(); }
 function openProjectDetail(id) {
   const project = projectById(id);
   if (!project) return;
@@ -1048,12 +1153,24 @@ function openProjectDetail(id) {
     const active = stageIndex === current;
     return `<button type="button" class="stage-choice ${done ? 'done' : active ? 'current' : ''}" data-project-stage="${stage}"><span class="stage-marker">${done ? '✓' : active ? '●' : number}</span><span>${number}. ${label}</span></button>`;
   }).join('');
-  modal(`<div class="modal-header"><div><p class="page-kicker">Acompanhamento do projeto</p><h2>${esc(project.name)}</h2><p>${esc(project.service)}</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><div class="detail-grid"><div class="detail-item"><small>Prazo</small><strong class="${countdown(project.dueDate).overdue ? 'muted' : ''}" data-countdown-date="${esc(project.dueDate || '')}" data-countdown-tone="plain">${countdown(project.dueDate).text}</strong></div><div class="detail-item"><small>Limite</small><strong>${formatLongDate(project.dueDate)}</strong></div></div><div class="field"><label>Etapas da jornada</label><p class="field-help">A prospecção é registrada na ficha do lead. Este projeto começa após a venda; escolha a etapa atual da entrega.</p><div class="stage-choice-list">${completedSales}${saleStage}${deliveryStages}</div><p class="muted" id="project-stage-label">Atual: etapa ${COMMERCIAL_PROGRESS_STAGES.length + current + 1} de ${FULL_PROJECT_PROGRESS_STAGES.length} · ${stageLabel(project.stage, PROJECT_STAGES)}</p></div><p class="modal-note">${esc(project.notes || 'Sem observações registradas.')}</p><div class="modal-actions"><button class="ghost-btn" data-modal-close>Fechar</button></div>`);
+  modal(`<div class="modal-header"><div><p class="page-kicker">Acompanhamento do projeto</p><h2>${esc(project.name)}</h2><p>${esc(project.service)}</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><div class="detail-grid"><div class="detail-item"><small>Prazo</small><strong class="${countdown(project.dueDate).overdue ? 'muted' : ''}" data-countdown-date="${esc(project.dueDate || '')}" data-countdown-tone="plain">${countdown(project.dueDate).text}</strong></div><div class="detail-item"><small>Limite</small><strong>${formatLongDate(project.dueDate)}</strong></div></div><form id="project-date-form" data-project-id="${esc(project.id)}" class="project-date-form"><label class="field"><span>Data de entrega</span><input class="field-input" type="date" name="dueDate" value="${localDateKey(project.dueDate)}" /></label><button class="ghost-btn" type="submit">Salvar prazo</button></form><div class="field"><label>Etapas da jornada</label><p class="field-help">A prospecção é registrada na ficha do lead. Este projeto começa após a venda; escolha a etapa atual da entrega.</p><div class="stage-choice-list">${completedSales}${saleStage}${deliveryStages}</div><p class="muted" id="project-stage-label">Atual: etapa ${COMMERCIAL_PROGRESS_STAGES.length + current + 1} de ${FULL_PROJECT_PROGRESS_STAGES.length} · ${stageLabel(project.stage, PROJECT_STAGES)}</p></div><p class="modal-note">${esc(project.notes || 'Sem observações registradas.')}</p><div class="modal-actions"><button class="ghost-btn" data-modal-close>Fechar</button></div>`);
+  el('#project-date-form')?.addEventListener('submit', saveProjectDueDate);
   all('[data-project-stage]').forEach((button) => button.addEventListener('click', () => {
     project.stage = button.dataset.projectStage;
     persist(); closeModal(); renderPages();
     toast(`Projeto movido para: ${stageLabel(project.stage, PROJECT_STAGES)}.`);
   }));
+}
+function saveProjectDueDate(event) {
+  event.preventDefault();
+  const project = projectById(event.currentTarget.dataset.projectId);
+  if (!project) return;
+  const value = new FormData(event.currentTarget).get('dueDate');
+  project.dueDate = value ? isoDate(dateFromLocalKey(value, 12)) : '';
+  persist();
+  closeModal();
+  renderPages();
+  toast(project.dueDate ? `Prazo de ${project.name} atualizado.` : `Data de entrega removida de ${project.name}.`);
 }
 
   function saveMessage(id) { const message = state.messages.find((item) => item.id === id); const text = el('#message-text')?.value.trim(); if (!message || !text) return; message.text = text; persist(); toast(isLocalHost ? 'Rascunho salvo no dispositivo.' : 'Rascunho salvo e enviado para sincronização.'); }
@@ -1162,6 +1279,6 @@ renderPages();
 hydrateRemoteState();
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 setInterval(refreshLiveCountdowns, 1000);
-setInterval(() => { if (document.visibilityState === 'visible') { if (currentPage === 'overview' || currentPage === 'projects' || currentPage === 'leads') renderPages(); } }, 60000);
+setInterval(() => { if (document.visibilityState === 'visible') { if (currentPage === 'overview' || currentPage === 'projects' || currentPage === 'calendar' || currentPage === 'leads') renderPages(); } }, 60000);
 setInterval(() => { if (currentPage === 'agents' && document.visibilityState === 'visible') refreshAgentRuntime(); }, 2500);
 refreshAgentRuntime(false);
