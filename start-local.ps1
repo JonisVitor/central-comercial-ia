@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
 $panelUrl = 'http://127.0.0.1:4175/'
 $runtimeUrl = 'http://127.0.0.1:4174/api/agent-runtime/health'
@@ -38,6 +38,25 @@ if (-not (Test-Path (Join-Path $projectRoot 'node_modules'))) {
   Write-Host 'Dependências do projeto não encontradas. Abra um terminal nesta pasta e rode npm install.' -ForegroundColor Red
   exit 1
 }
+
+# Replace only this application's recognizable executor when code was updated.
+$expectedVersion = (Get-Content (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json).version
+try {
+  $runtimeInfo = Invoke-RestMethod -Uri $runtimeUrl -TimeoutSec 2
+  $newestRuntimeFile = @((Get-Item (Join-Path $projectRoot 'agents-runtime/server.mjs')).LastWriteTimeUtc, (Get-Item (Join-Path $projectRoot 'agents-runtime/whatsapp-local.mjs')).LastWriteTimeUtc) | Sort-Object -Descending | Select-Object -First 1
+  $runtimeOutdated = $runtimeInfo.version -ne $expectedVersion -or -not $runtimeInfo.startedAt -or ($newestRuntimeFile -gt ([datetime]$runtimeInfo.startedAt).ToUniversalTime())
+  if ($runtimeInfo.cli -eq 'Codex CLI local' -and $runtimeOutdated) {
+    $listener = Get-NetTCPConnection -State Listen -LocalPort 4174 -ErrorAction Stop | Select-Object -First 1
+    $serviceProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)"
+    $sameRoot = -not $runtimeInfo.projectRoot -or $runtimeInfo.projectRoot -eq $projectRoot
+    if ($sameRoot -and $serviceProcess.Name -eq 'node.exe' -and $serviceProcess.CommandLine -match 'agents-runtime[\\/]server\.mjs') {
+      Write-Host 'Atualizando o executor local para a versão do projeto...'
+      if ($runtimeInfo.running -or $runtimeInfo.busy) { Write-Warning 'Há agentes em execução. Aguarde terminarem antes de atualizar.'; exit 1 }
+      & taskkill.exe /PID $listener.OwningProcess /T /F | Out-Null
+      Start-Sleep -Milliseconds 500
+    }
+  }
+} catch { }
 
 if (-not (Test-LocalEndpoint $runtimeUrl)) {
   Start-ProjectService 'executor Codex' 4174 'agents-runtime'

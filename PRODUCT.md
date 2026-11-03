@@ -49,3 +49,11 @@ Prospects are found and checked manually, including Google Maps and digital pres
 - Make the evidence and next action for each lead easy to understand.
 - Show whether activity is real, pending, or simulated.
 - Keep sales work and website delivery connected in one workflow.
+
+## Local operations extension (0.6.42)
+
+The WhatsApp menu beside Conversations connects a separate local WhatsApp Web session by QR, restores saved sessions when the executor starts, and imports only new messages for CRM phone numbers. This nonofficial connector requires Chrome and a running PC. Pairing and end-to-end messaging need owner verification. API routes and QR data are excluded from service-worker caches.
+
+Central de trabalho provides an actionable queue, campaigns with manual membership and unsent A/B draft distribution, a versioned instruction flow, configurable follow-up reminders, silent-lead recovery, factual counters, bounded activity history and an AI integration map. Optional browser agenda notifications need a user grant and an open page.
+
+AI suggestions for campaigns, flow, follow-ups, recovery and next steps use the authenticated local Codex CLI. The existing seven-agent analysis and calendar orchestration remain connected. No automatic customer replies, media transcription, LP publication, social publishing or public-site Codex execution are enabled.

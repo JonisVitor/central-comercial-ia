@@ -1,4 +1,5 @@
 import './styles.css';
+import { createOperations } from './operations.js';
 
 const STORAGE_KEY = 'central-comercial-ia:v1';
 const ASSISTANT_CHAT_STORAGE = 'central-comercial-ia:assistant-chat:v1';
@@ -88,7 +89,8 @@ function seedState() {
 }
 
 let state = loadState();
-let currentPage = 'overview';
+const validPages = ['overview','leads','projects','calendar','messages','whatsapp','operations','agents','services','settings'];
+let currentPage = validPages.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
 let currentLeadId = state.leads[0]?.id;
 let currentMessageId = state.messages[0]?.id;
 let calendarCursor = new Date(today().getFullYear(), today().getMonth(), 1);
@@ -105,6 +107,7 @@ let assistantOpen = false;
 let assistantBusy = false;
 let customerReplyBusy = false;
 let whatsappSending = false;
+let whatsappInboxBusy = false;
 let whatsappStatus = { connected: false, fields: {}, webhookUrl: '', channel: 'WhatsApp Business Platform · Cloud API' };
 let assistantMessages = loadAssistantMessages();
 const researchSelection = new Set();
@@ -152,6 +155,7 @@ function loadAssistantMessages() {
 }
 function saveAssistantMessages() { localStorage.setItem(ASSISTANT_CHAT_STORAGE, JSON.stringify(assistantMessages.slice(-30))); }
 function persist() {
+  operations.track();
   state.calendarItems = Array.isArray(state.calendarItems) ? state.calendarItems : [];
   state.dailyReviews = Array.isArray(state.dailyReviews) ? state.dailyReviews : [];
   state.dailyPlans = Array.isArray(state.dailyPlans) ? state.dailyPlans : [];
@@ -206,7 +210,9 @@ function followUpReminderFor(leadId) {
 function scheduleLeadFollowUp(message, lead, sentAt = Date.now()) {
   if (!message || !lead || lead.stage !== 'contatado' || message.followUpSentAt) return;
   state.calendarItems ||= [];
-  const date = localDateKey(addLocalDays(new Date(sentAt), 3));
+  const delay=operations.followUpDelay();
+  message.followUpVariant ||= state.messages.indexOf(message) % 2 ? 'B' : 'A';
+  const date = localDateKey(addLocalDays(new Date(sentAt), delay));
   const item = followUpReminderFor(lead.id) || state.calendarItems.find((entry) => entry.source === 'follow-up' && entry.leadId === lead.id);
   if (item) {
     Object.assign(item, { date, title: `Retomar contato: ${lead.name}`, details: 'Confira se o cliente respondeu. Se não houver resposta, revise a sugestão na aba Conversas. A Central não envia mensagens automaticamente.', status: 'pending', updatedAt: isoDate(Date.now()) });
@@ -226,7 +232,7 @@ function initializeFollowUpReminders() {
     const sentTimes = [message.sentAt, ...(message.conversation || []).filter((item) => item.role === 'operador' && item.status === 'enviada').map((item) => item.sentAt)].filter(Boolean).map(Date.parse).filter(Number.isFinite);
     const lastSent = sentTimes.length ? Math.max(...sentTimes) : NaN;
     if (!Number.isFinite(lastSent) || now >= lastSent + 7 * 86400000) continue;
-    scheduleLeadFollowUp(message, lead, Math.max(lastSent, now - 3 * 86400000));
+    scheduleLeadFollowUp(message, lead, Math.max(lastSent, now - operations.followUpDelay() * 86400000));
     added = true;
   }
   state.followUpRemindersInitialized = true;
@@ -310,30 +316,70 @@ async function syncRemoteState() {
   }
 }
 async function refreshWhatsAppStatus() {
-  if (isLocalHost) return;
   try {
     const response = await fetch('/api/whatsapp/status', { credentials: 'include', cache: 'no-store' });
     if (!response.ok) throw new Error('Não foi possível consultar a integração.');
-    whatsappStatus = await response.json();
-    if (currentPage === 'messages' || currentPage === 'settings') renderPages();
+    const next = await response.json();
+    const changed = JSON.stringify(next) !== JSON.stringify(whatsappStatus);
+    whatsappStatus = next;
+    if (changed && ['messages','settings','whatsapp'].includes(currentPage)) renderPages();
   } catch {
     whatsappStatus = { ...whatsappStatus, connected: false };
   }
 }
-async function refreshWhatsAppInbox() {
-  if (isLocalHost || !remoteHydrated || !whatsappStatus.connected) return;
+function renderLocalWhatsAppSettings() {
+  const labels = { disconnected: 'Desconectado', starting: 'Abrindo conexão…', qr: 'Leia o QR Code', authenticating: 'Confirmando no celular…', ready: 'Conectado', error: 'Precisa de atenção' };
+  return `<article class="settings-card whatsapp-settings local-whatsapp"><div class="whatsapp-settings-heading"><div><h2>WhatsApp neste computador</h2><p>Conecte como um aparelho vinculado. Só as mensagens de telefones cadastrados nos seus leads entram no painel.</p></div><span class="status-badge ${whatsappStatus.connected ? 'green' : 'yellow'}">${esc(labels[whatsappStatus.state] || 'Desconectado')}</span></div>${whatsappStatus.qrDataUrl?.startsWith('data:image/png;base64,') ? `<div class="wa-qr-step"><img src="${whatsappStatus.qrDataUrl}" width="288" height="288" alt="QR Code para conectar seu WhatsApp"><ol><li>Abra o WhatsApp no celular.</li><li>Entre em Aparelhos conectados.</li><li>Toque em Conectar um aparelho e leia este código.</li></ol></div>` : ''}${whatsappStatus.connected ? `<p>Conexão ativa${whatsappStatus.account ? ` · final ${esc(whatsappStatus.account.slice(-4))}` : ''}. Abra Conversas para revisar e responder.</p>` : '<p>O QR pode levar alguns segundos para aparecer. Se a sessão já estiver salva, ela será restaurada ao conectar.</p>'}${whatsappStatus.error ? `<p class="modal-note" role="alert">${esc(whatsappStatus.error)}</p>` : ''}<div class="settings-actions"><button type="button" class="primary-btn" data-wa-local="connect" ${['starting','qr','authenticating','ready'].includes(whatsappStatus.state)?'disabled':''}>Conectar WhatsApp</button><button type="button" class="ghost-btn" data-wa-local="disconnect">Desconectar / gerar outro QR</button><button type="button" class="ghost-btn" data-page="messages">Abrir conversas</button></div><p class="field-help">Conexão não oficial do WhatsApp Web. O computador precisa ficar ligado; a sessão pode desconectar ou sofrer restrições do WhatsApp. A IA prepara sugestões, e você confirma cada envio.</p></article>`;
+}
+function renderWhatsAppWorkspace() {
+  const contacts = state.messages.map(message => ({ message, lead: leadById(message.leadId) })).filter(({lead}) => lead?.phone);
+  return `<div class="work-page"><div class="work-heading"><h1>WhatsApp</h1><p>Conecte seu celular e acompanhe as conversas dos leads neste computador.</p></div>${isLocalHost ? renderLocalWhatsAppSettings() : '<p class="modal-note">A conexão por QR roda no computador. Abra a versão local pelo START-LOCAL.cmd. A integração oficial online continua em Configurações.</p>'}<section class="work-content"><div class="work-toolbar"><h2>Conversas dos seus leads</h2><span class="status-badge ${whatsappStatus.connected?'green':'yellow'}">${whatsappStatus.connected?'Recebimento ativo':'Conecte para receber novas mensagens'}</span></div><p>A sessão salva é restaurada quando o executor local inicia. As novas mensagens de telefones cadastrados entram aqui; áudios e imagens precisam ser conferidos no WhatsApp.</p><div class="work-list">${contacts.map(({message,lead})=>{const last=message.conversation?.at(-1), status=messageListStatus(message,lead);return `<article class="work-row"><div><strong>${esc(lead.name)}</strong><p><span class="message-item-status ${status.className}">${esc(status.label)}</span></p><small>${esc(last?.text?.slice(0,170)||lead.phone)}</small></div><button type="button" class="ghost-btn" data-wa-conversation="${esc(lead.id)}">Abrir conversa</button></article>`;}).join('')||'<p>Cadastre o telefone dos leads para vincular as conversas. Suas conversas pessoais não entram nesta lista.</p>'}</div></section></div>`;
+}
+async function localWhatsAppAction(action) {
+  if (action === 'disconnect' && !confirm('Desconectar esta sessão do WhatsApp?')) return;
   try {
+    if (action === 'connect') await syncWhatsAppContacts();
+    const response = await fetch(`/api/whatsapp/${action}`, { method: 'POST', headers: { 'X-Central-Action': 'whatsapp' } });
+    const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Não consegui abrir a conexão.');
+    whatsappStatus = result; operations.audit('WhatsApp local', action === 'connect' ? 'Conexão solicitada. Aguardando sessão ou QR.' : 'Sessão desconectada.'); persist(); renderPages();
+  } catch (error) { toast(error.message); }
+}
+async function syncWhatsAppContacts() {
+  const response = await fetch('/api/whatsapp/contacts', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Central-Action': 'whatsapp' }, body: JSON.stringify({ contacts: state.leads.filter(lead => lead.phone).map(lead => ({ id: lead.id, phone: lead.phone, canContact: !['perdido','nao-contatar'].includes(lead.stage) })) }) });
+  if (!response.ok) throw new Error('Não consegui vincular os telefones dos leads ao WhatsApp local. Reinicie pelo START-LOCAL.cmd.');
+}
+async function sendLocalInitial(id) {
+  const message = state.messages.find(item => item.id === id), lead = message && leadById(message.leadId);
+  const text = el('#message-text')?.value.trim();
+  if (!message || !lead || !text || message.sentAt || whatsappSending) return;
+  if (CLOSED_LEAD_STAGES.includes(lead.stage)) return toast('Este contato está encerrado. Revise a etapa antes de enviar.');
+  const blocked = operations.canSend(lead.id); if (blocked) return toast(blocked);
+  if (!confirm(`Enviar esta mensagem agora para ${lead.name} (${lead.phone})?`)) return;
+  whatsappSending = true; message.text = text; renderPages();
+  try {
+    await syncWhatsAppContacts();
+    const response = await fetch('/api/whatsapp/send', { method: 'POST', headers: { 'Content-Type':'application/json', 'X-Central-Action':'whatsapp' }, body: JSON.stringify({ leadId:lead.id, phone:lead.phone, text, confirmed:true }) });
+    const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Envio não confirmado.');
+    message.whatsappMessageId = result.whatsappMessageId; confirmSent(message.id);
+  } catch(error) { toast(error.message); }
+  finally { whatsappSending = false; renderPages(); }
+}
+async function refreshWhatsAppInbox() {
+  if ((!isLocalHost && !remoteHydrated) || !whatsappStatus.connected || whatsappInboxBusy) return;
+  whatsappInboxBusy = true;
+  try {
+    if (isLocalHost) await syncWhatsAppContacts();
     const response = await fetch('/api/whatsapp/inbox?limit=500', { credentials: 'include', cache: 'no-store' });
     if (!response.ok) throw new Error('Falha ao sincronizar a caixa de entrada.');
     const payload = await response.json();
     let changed = false;
-    for (const item of payload.messages || []) {
+    for (const item of [...(payload.messages || [])].sort((a,b) => new Date(a.occurredAt) - new Date(b.occurredAt))) {
       const lead = item.leadId ? leadById(item.leadId) : state.leads.find((candidate) => normalizeCRMPhone(candidate.phone) === item.contactPhone);
       if (!lead) continue;
       const conversation = messageByLead(lead.id);
       if (!conversation) continue;
       conversation.conversation ||= [];
-      if (conversation.conversation.some((part) => part.whatsappMessageId === item.whatsappMessageId)) continue;
+      if (conversation.whatsappMessageId === item.whatsappMessageId || conversation.conversation.some((part) => part.whatsappMessageId === item.whatsappMessageId)) continue;
       conversation.conversation.push({
         role: item.direction === 'inbound' ? 'cliente' : 'operador',
         status: item.direction === 'outbound' ? 'enviada' : 'recebida',
@@ -343,19 +389,24 @@ async function refreshWhatsAppInbox() {
         whatsappMessageId: item.whatsappMessageId,
       });
       if (item.direction === 'inbound' && !['ganho', 'perdido', 'nao-contatar'].includes(lead.stage)) {
-        lead.stage = 'respondeu';
+        if (['novo','verificar','qualificado','mensagem','aprovacao','contatado'].includes(lead.stage)) lead.stage = 'respondeu';
         lead.responseDue = null;
         clearLeadFollowUp(lead.id);
+      }
+      if (item.direction === 'outbound') {
+        if (!conversation.sentAt) { conversation.sentAt = item.occurredAt; if (['novo','verificar','qualificado','mensagem','aprovacao'].includes(lead.stage)) lead.stage = 'contatado'; scheduleLeadFollowUp(conversation,lead,Date.parse(item.occurredAt)); }
+        if (!['ganho','perdido','nao-contatar'].includes(lead.stage)) lead.responseDue = isoDate(Date.parse(item.occurredAt) + 7 * 86400000);
+        operations.sent(lead.id);
       }
       changed = true;
     }
     if (changed) {
       persist();
-      if (currentPage === 'messages') renderPages();
+      if (['messages','whatsapp'].includes(currentPage)) renderPages();
     }
   } catch (error) {
     console.warn('Não foi possível sincronizar as mensagens do WhatsApp.', error);
-  }
+  } finally { whatsappInboxBusy = false; }
 }
 function normalizeCRMPhone(value = '') {
   let digits = String(value).replace(/\D/g, '');
@@ -367,13 +418,19 @@ async function sendWhatsAppReply(messageId) {
   const suggestion = [...(message?.conversation || [])].reverse().find((item) => item.role === 'sugestao' && item.status !== 'enviada');
   const text = el('#customer-reply-suggestion')?.value.trim();
   if (!message || !suggestion || !text || whatsappSending) return;
+  const lead = leadById(message.leadId);
+  if (['perdido','nao-contatar'].includes(lead?.stage)) return toast('Contato encerrado. Revise a etapa antes de responder.');
+  const blocked = operations.canSend(message.leadId);
+  if (blocked) return toast(blocked);
+  if (!confirm(`Enviar esta resposta para ${lead?.name || 'este contato'} pelo WhatsApp?`)) return;
   suggestion.text = text;
   whatsappSending = true;
   renderPages();
   try {
+    if (isLocalHost) await syncWhatsAppContacts();
     const response = await fetch('/api/whatsapp/send', {
-      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ leadId: message.leadId, text }),
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', 'X-Central-Action': 'whatsapp' },
+      body: JSON.stringify({ leadId: message.leadId, text, phone: lead?.phone, confirmed: true }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || 'A Meta não confirmou o envio.');
@@ -386,10 +443,11 @@ async function sendWhatsAppReply(messageId) {
       lead.stage = 'respondeu';
       lead.responseDue = daysFromNow(7);
     }
+    operations.sent(message.leadId);
     persist();
     await refreshWhatsAppInbox();
     renderPages();
-    toast('Resposta enviada pela WhatsApp Business Platform.');
+    toast(isLocalHost ? 'Resposta enviada pelo WhatsApp conectado.' : 'Resposta enviada pela WhatsApp Business Platform.');
   } catch (error) {
     renderPages();
     toast(error.message || 'Não foi possível enviar pelo WhatsApp.');
@@ -444,13 +502,15 @@ function renderShell() {
   document.querySelector('#app').innerHTML = `
     <div class="app-shell">
       <aside class="sidebar">
-        <a class="brand" href="#visao-geral" data-page="overview"><span class="brand-mark">⌁</span><span><span class="brand-title">Central</span><span class="brand-subtitle">Comercial IA</span></span></a>
+        <a class="brand" href="#overview" data-page="overview"><span class="brand-mark">⌁</span><span><span class="brand-title">Central</span><span class="brand-subtitle">Comercial IA</span></span></a>
         <div><div class="nav-label">Operação</div><nav class="nav-list" aria-label="Navegação principal">
           ${navItem('overview', '⌂', 'Visão geral')}
           ${navItem('leads', '◎', 'Prospecção')}
           ${navItem('projects', '▱', 'Projetos')}
           ${navItem('calendar', '▦', 'Calendário')}
           ${navItem('messages', '◌', 'Conversas')}
+          ${navItem('whatsapp', '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a8 8 0 0 1-11.5 7.2L3 20l1.4-5.2A8 8 0 1 1 20 11.5Z"/><path d="M8 8c1 4 3 6 7 7l1-2-2-1-1 1-2-2 1-1-1-2Z"/></svg>', 'WhatsApp')}
+          ${navItem('operations', '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>', 'Central de trabalho')}
           ${navItem('agents', '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.2"/><path d="M3.8 19v-1.1a5.2 5.2 0 0 1 10.4 0V19zM15.2 14.3a4.1 4.1 0 0 1 5 4V19h-3.2"/></svg>', 'Agentes')}
         </nav></div>
         <div><div class="nav-label">Base</div><nav class="nav-list" aria-label="Configurações">
@@ -667,6 +727,7 @@ function applyOrchestrationResult(payload = {}) {
     if (project && summary.summary) { project.aiSummary = String(summary.summary).trim().slice(0, 700); changed = true; }
   }
   if (changed) {
+    operations.audit('Agenda atualizada pela IA', `${added} itens novos; ${deadlineUpdates} prazos atualizados.`, 'Codex local');
     persist();
     renderPages();
     if (added || deadlineUpdates) return [added ? `${added} item${added === 1 ? '' : 's'} entraram no calendário` : '', deadlineUpdates ? `${deadlineUpdates} prazo${deadlineUpdates === 1 ? '' : 's'} de projeto atualizado${deadlineUpdates === 1 ? '' : 's'}` : ''].filter(Boolean).join(' e ') + '.';
@@ -715,20 +776,22 @@ function applyAssistantDraftUpdate(target, text) {
   return false;
 }
 
-function navItem(page, icon, label) { return `<button class="nav-item ${currentPage === page ? 'active' : ''}" data-page="${page}"><span class="nav-icon">${icon}</span><span>${label}</span></button>`; }
+function navItem(page, icon, label) { return `<button class="nav-item ${currentPage === page ? 'active' : ''}" aria-label="${esc(label)}" data-page="${page}"><span class="nav-icon">${icon}</span><span>${label}</span></button>`; }
 function pageHeader(kicker, title, lede, action = '') { return `<div class="page-heading"><div><p class="page-kicker">${kicker}</p><h1>${title}</h1><p class="lede">${lede}</p></div>${action}</div>`; }
 
 function renderPages() {
   el('#pages').innerHTML = `
-    <section class="page ${currentPage === 'overview' ? 'active' : ''}" data-page-view="overview">${renderOverview()}</section>
+    <section class="page ${currentPage === 'overview' ? 'active' : ''}" data-page-view="overview">${operations.brief()}${renderOverview()}</section>
     <section class="page ${currentPage === 'leads' ? 'active' : ''}" data-page-view="leads">${renderLeads()}</section>
     <section class="page ${currentPage === 'projects' ? 'active' : ''}" data-page-view="projects">${renderProjects()}</section>
     <section class="page ${currentPage === 'calendar' ? 'active' : ''}" data-page-view="calendar">${renderCalendar()}</section>
     <section class="page ${currentPage === 'messages' ? 'active' : ''}" data-page-view="messages">${renderMessages()}</section>
     <section class="page ${currentPage === 'agents' ? 'active' : ''}" data-page-view="agents">${renderAgents()}</section>
     <section class="page ${currentPage === 'services' ? 'active' : ''}" data-page-view="services">${renderServices()}</section>
-    <section class="page ${currentPage === 'settings' ? 'active' : ''}" data-page-view="settings">${renderSettings()}</section>`;
-  el('#breadcrumb-current').textContent = { overview: 'Visão geral', leads: 'Prospecção', projects: 'Projetos', calendar: 'Calendário', messages: 'Conversas', agents: 'Agentes', services: 'Serviços', settings: 'Configurações' }[currentPage];
+    <section class="page ${currentPage === 'settings' ? 'active' : ''}" data-page-view="settings">${renderSettings()}</section>
+    <section class="page ${currentPage === 'whatsapp' ? 'active' : ''}" data-page-view="whatsapp">${renderWhatsAppWorkspace()}</section>
+    <section class="page ${currentPage === 'operations' ? 'active' : ''}" data-page-view="operations">${operations.render()}</section>`;
+  el('#breadcrumb-current').textContent = { whatsapp: 'WhatsApp', operations: 'Central de trabalho', overview: 'Visão geral', leads: 'Prospecção', projects: 'Projetos', calendar: 'Calendário', messages: 'Conversas', agents: 'Agentes', services: 'Serviços', settings: 'Configurações' }[currentPage];
   bindPageEvents();
 }
 
@@ -1022,18 +1085,18 @@ function renderMessages() {
   const conversation = current?.conversation || [];
   const latestSuggestion = [...conversation].reverse().find((item) => item.role === 'sugestao' && item.status !== 'enviada');
   const conversationLog = conversation.length ? `<div class="reply-history" aria-label="Histórico da conversa">${conversation.map((item) => { const suggestion = item.role === 'sugestao' && item.status !== 'enviada'; const text = suggestion ? removeEmojis(item.text) : item.text; return `<article class="reply-bubble ${item.role === 'cliente' ? 'client' : item.role === 'operador' || item.status === 'enviada' ? 'operator' : 'suggestion'}" ${suggestion ? 'role="note" aria-label="Resposta da IA, ainda não enviada"' : ''}><strong>${item.role === 'cliente' ? 'Cliente' : item.role === 'operador' || item.status === 'enviada' ? 'Você · enviada' : 'Resposta da IA · não enviada'}</strong><p>${esc(text).replace(/\n/g, '<br>')}</p></article>`; }).join('')}</div>` : '<p class="muted reply-empty">As respostas do cliente e os rascunhos sugeridos aparecerão aqui.</p>';
-  const suggestedReply = latestSuggestion ? `<label class="field reply-suggestion-field"><span>Resposta sugerida — revise antes de copiar</span><textarea class="field-textarea" id="customer-reply-suggestion">${esc(removeEmojis(latestSuggestion.text))}</textarea></label><div class="message-actions"><button type="button" class="primary-btn" data-action="copy-customer-reply" data-message-id="${current.id}">Copiar resposta</button><button type="button" class="ghost-btn" data-action="send-customer-reply" data-message-id="${current.id}" ${!whatsappStatus.connected || whatsappSending ? 'disabled' : ''}>${whatsappSending ? 'Enviando…' : 'Enviar pelo WhatsApp oficial'}</button></div>` : '';
+  const suggestedReply = latestSuggestion ? `<label class="field reply-suggestion-field"><span>Resposta sugerida — revise antes de copiar</span><textarea class="field-textarea" id="customer-reply-suggestion">${esc(removeEmojis(latestSuggestion.text))}</textarea></label><div class="message-actions"><button type="button" class="primary-btn" data-action="copy-customer-reply" data-message-id="${current.id}">Copiar resposta</button><button type="button" class="ghost-btn" data-action="send-customer-reply" data-message-id="${current.id}" ${!whatsappStatus.connected || whatsappSending ? 'disabled' : ''}>${whatsappSending ? 'Enviando…' : isLocalHost ? 'Enviar pelo WhatsApp conectado' : 'Enviar pelo WhatsApp oficial'}</button></div>` : '';
   const latestIsCustomer = conversation.at(-1)?.role === 'cliente';
   const followUpItem = current && followUpReminderFor(current.leadId);
   const hasFollowUp = Boolean(current?.sentAt && lead?.stage === 'contatado' && !latestIsCustomer && followUpItem && !current.followUpSentAt);
   const followUpIsDue = Boolean(followUpItem && followUpItem.date <= localDateKey(today()));
-  const followUpComposer = hasFollowUp && followUpIsDue ? `<section class="follow-up-coach"><div><p class="page-kicker">PRÓXIMO PASSO · ${esc(formatDate(followUpItem.date))}</p><h3>Retomar contato</h3><p>Revise o texto e envie você mesmo, se fizer sentido. A Central não dispara mensagens.</p></div><label class="field"><span>Sugestão de mensagem</span><textarea class="field-textarea" id="follow-up-text" maxlength="1200">${esc(current.followUpDraft || followUpText(lead))}</textarea></label><div class="message-actions"><button type="button" class="primary-btn" data-action="copy-follow-up" data-message-id="${current.id}">Copiar mensagem</button><button type="button" class="ghost-btn" data-action="open-follow-up-whatsapp" data-message-id="${current.id}">Abrir WhatsApp</button><button type="button" class="ghost-btn" data-action="confirm-follow-up" data-message-id="${current.id}">Já enviei manualmente</button></div><p class="modal-note">O lembrete será concluído quando você confirmar o envio ou quando o cliente responder.</p></section>` : '';
+  const followUpComposer = hasFollowUp && followUpIsDue ? `<section class="follow-up-coach"><div><p class="page-kicker">PRÓXIMO PASSO · ${esc(formatDate(followUpItem.date))}</p><h3>Retomar contato</h3><p>Revise o texto e envie você mesmo, se fizer sentido. A Central não dispara mensagens.</p></div><label class="field"><span>Sugestão de mensagem</span><textarea class="field-textarea" id="follow-up-text" maxlength="1200">${esc(current.followUpDraft || operations.followUpDraft(current) || followUpText(lead))}</textarea></label><div class="message-actions"><button type="button" class="primary-btn" data-action="copy-follow-up" data-message-id="${current.id}">Copiar mensagem</button><button type="button" class="ghost-btn" data-action="open-follow-up-whatsapp" data-message-id="${current.id}">Abrir WhatsApp</button><button type="button" class="ghost-btn" data-action="confirm-follow-up" data-message-id="${current.id}">Já enviei manualmente</button></div><p class="modal-note">O lembrete será concluído quando você confirmar o envio ou quando o cliente responder.</p></section>` : '';
   const followUpScheduled = hasFollowUp && !followUpIsDue ? `<section class="follow-up-coach follow-up-scheduled"><div><p class="page-kicker">PRÓXIMO PASSO · AGENDADO</p><h3>Retomar contato em ${esc(formatDate(followUpItem.date))}</h3><p>A Central vai deixar o lembrete no calendário. A mensagem só ficará disponível para revisão no dia agendado.</p></div><button type="button" class="ghost-btn" data-page="calendar">Ver no calendário →</button></section>` : '';
   const analyzeLatest = latestIsCustomer ? `<button type="button" class="ghost-btn" data-action="analyze-latest-customer" ${customerReplyBusy || !agentRuntime.connected ? 'disabled' : ''}>${customerReplyBusy ? 'Analisando…' : 'Analisar última mensagem recebida'}</button>` : '';
-  const connectionNote = `<div class="whatsapp-connection-strip"><span class="status-badge ${whatsappStatus.connected ? 'green' : 'yellow'}">${whatsappStatus.connected ? 'WhatsApp oficial conectado' : isLocalHost ? 'Conexão WhatsApp configurada no painel online' : 'WhatsApp oficial não configurado'}</span><span>${whatsappStatus.connected ? 'As respostas recebidas são sincronizadas automaticamente.' : 'Configure a WhatsApp Business Platform em Configurações.'}</span><button class="detail-link" type="button" data-page="settings">Configurar →</button></div>`;
-  const replyComposer = `<section class="reply-coach"><div class="reply-coach-heading"><div><h3>O cliente respondeu?</h3><p>As mensagens recebidas pela integração aparecem aqui; a IA prepara a resposta para você revisar.</p></div><span class="status-badge ${agentRuntime.connected ? 'green' : 'yellow'}">${agentRuntime.connected ? 'Codex local conectado' : 'Codex local desconectado'}</span></div>${conversationLog}<div class="message-actions">${analyzeLatest}</div><form id="customer-reply-form"><label class="field" for="customer-reply-input"><span>Resposta recebida</span><textarea class="field-textarea" id="customer-reply-input" name="customerReply" maxlength="5000" placeholder="Cole aqui o que o cliente escreveu…" required></textarea></label><button class="primary-btn" type="submit" ${customerReplyBusy || !agentRuntime.connected ? 'disabled' : ''}>${customerReplyBusy ? 'Analisando conversa…' : 'Analisar e sugerir resposta'}</button></form>${suggestedReply}<p class="modal-note">O envio é feito pela API oficial só depois que você clicar em “Enviar pelo WhatsApp oficial”. Mensagens livres exigem uma conversa iniciada pelo contato nas últimas 24 horas.</p></section>`;
+  const connectionNote = `<div class="whatsapp-connection-strip"><span class="status-badge ${whatsappStatus.connected ? 'green' : 'yellow'}">${whatsappStatus.connected ? (isLocalHost ? 'WhatsApp local conectado' : 'WhatsApp oficial conectado') : isLocalHost ? 'Conecte seu WhatsApp por QR Code' : 'WhatsApp oficial não configurado'}</span><span>${whatsappStatus.connected ? 'As respostas recebidas são sincronizadas automaticamente.' : (isLocalHost ? 'Abra Configurações e clique em Conectar WhatsApp.' : 'Configure a WhatsApp Business Platform em Configurações.')}</span><button class="detail-link" type="button" data-page="settings">Configurar →</button></div>`;
+  const replyComposer = `<section class="reply-coach"><div class="reply-coach-heading"><div><h3>O cliente respondeu?</h3><p>As mensagens recebidas pela integração aparecem aqui; a IA prepara a resposta para você revisar.</p></div><span class="status-badge ${agentRuntime.connected ? 'green' : 'yellow'}">${agentRuntime.connected ? 'Codex local conectado' : 'Codex local desconectado'}</span></div>${conversationLog}<div class="message-actions">${analyzeLatest}</div><form id="customer-reply-form"><label class="field" for="customer-reply-input"><span>Resposta recebida</span><textarea class="field-textarea" id="customer-reply-input" name="customerReply" maxlength="5000" placeholder="Cole aqui o que o cliente escreveu…" required></textarea></label><button class="primary-btn" type="submit" ${customerReplyBusy || !agentRuntime.connected ? 'disabled' : ''}>${customerReplyBusy ? 'Analisando conversa…' : 'Analisar e sugerir resposta'}</button></form>${suggestedReply}<p class="modal-note">${isLocalHost ? 'A IA prepara o texto; cada envio pelo WhatsApp conectado depende da sua confirmação.' : 'O envio oficial exige uma conversa iniciada pelo contato nas últimas 24 horas e sua confirmação.'}</p></section>`;
   return `${pageHeader('Conversas sob controle', 'WhatsApp e CRM no mesmo lugar.', 'Receba respostas no painel, gere sugestões com a IA e envie pela integração oficial da Meta.', '<button class="primary-btn" data-action="new-lead">+ Preparar contato</button>')}${connectionNote}
-    <div class="messages-layout"><div class="message-list"><div class="message-list-head">${state.messages.length} conversas registradas</div>${state.messages.map((message) => { const itemLead = leadById(message.leadId); const status = messageListStatus(message, itemLead); return `<button class="message-item ${status.className} ${message.id === currentMessageId ? 'active' : ''}" data-message-id="${message.id}"><strong>${esc(itemLead?.name || 'Empresa')}</strong><span class="message-item-status ${status.className}" title="${esc(status.label)}">${status.label}</span></button>`; }).join('')}</div><div class="message-editor">${current && lead ? `<div class="panel-header"><div><p class="page-kicker">${messageStateLabel(current)}</p><h2>${esc(lead.name)}</h2><p>${esc(lead.category)} · ${esc(lead.city)}</p></div><span class="heat-badge">♨ ${lead.heat}/100</span></div><div class="message-meta"><span class="tag">Site: ${esc(lead.website)}</span><span class="tag">Maps: ${esc(lead.maps)}</span></div><label class="field"><span>Mensagem inicial — revise antes de abrir o WhatsApp</span><textarea class="field-textarea" id="message-text">${esc(current.text)}</textarea></label><div class="message-actions"><button class="primary-btn" data-action="save-message" data-message-id="${current.id}">Salvar rascunho</button><button class="ghost-btn" data-action="open-whatsapp" data-message-id="${current.id}">↗ Abrir WhatsApp</button><button class="ghost-btn" data-action="confirm-sent" data-message-id="${current.id}">${current.sentAt ? '✓ Enviado manualmente' : 'Confirmar envio manual'}</button></div><p class="modal-note" style="margin-top:18px">A Central não envia mensagens automaticamente. O envio continua sendo feito por você no WhatsApp.</p>${followUpScheduled}${followUpComposer}${replyComposer}` : emptyState('Nenhuma mensagem preparada', 'Cadastre um lead e prepare o primeiro contato.')}</div></div>`;
+    <div class="messages-layout"><div class="message-list"><div class="message-list-head">${state.messages.length} conversas registradas</div>${state.messages.map((message) => { const itemLead = leadById(message.leadId); const status = messageListStatus(message, itemLead); return `<button class="message-item ${status.className} ${message.id === currentMessageId ? 'active' : ''}" data-message-id="${message.id}"><strong>${esc(itemLead?.name || 'Empresa')}</strong><span class="message-item-status ${status.className}" title="${esc(status.label)}">${status.label}</span></button>`; }).join('')}</div><div class="message-editor">${current && lead ? `<div class="panel-header"><div><p class="page-kicker">${messageStateLabel(current)}</p><h2>${esc(lead.name)}</h2><p>${esc(lead.category)} · ${esc(lead.city)}</p></div><span class="heat-badge">♨ ${lead.heat}/100</span></div><div class="message-meta"><span class="tag">Site: ${esc(lead.website)}</span><span class="tag">Maps: ${esc(lead.maps)}</span></div><label class="field"><span>Mensagem inicial — revise antes de abrir o WhatsApp</span><textarea class="field-textarea" id="message-text">${esc(current.text)}</textarea></label><div class="message-actions"><button class="primary-btn" data-action="save-message" data-message-id="${current.id}">Salvar rascunho</button><button class="ghost-btn" data-action="open-whatsapp" data-message-id="${current.id}">↗ Abrir WhatsApp</button><button class="ghost-btn" data-action="confirm-sent" data-message-id="${current.id}">${current.sentAt ? '✓ Enviado manualmente' : 'Confirmar envio manual'}</button>${isLocalHost && whatsappStatus.connected && !current.sentAt ? `<button class="primary-btn" data-action="send-local-initial" data-message-id="${current.id}" ${whatsappSending ? 'disabled' : ''}>Enviar pelo WhatsApp conectado</button>` : ''}</div><p class="modal-note" style="margin-top:18px">A Central não envia mensagens automaticamente. O envio continua sendo feito por você no WhatsApp.</p>${followUpScheduled}${followUpComposer}${replyComposer}` : emptyState('Nenhuma mensagem preparada', 'Cadastre um lead e prepare o primeiro contato.')}</div></div>`;
 }
 function messageListStatus(message, lead) {
   const last = message.conversation?.at(-1);
@@ -1055,7 +1118,7 @@ function renderServices() { return `${pageHeader('Catálogo comercial', 'Uma ofe
   function renderSettings() {
     const online = !isLocalHost && remoteHydrated;
     const accessCard = isLocalHost
-      ? `<article class="settings-card access-guide"><div class="access-guide-heading"><div><span class="status-badge yellow">Você está no painel local</span><h2>Entrar no painel online</h2></div></div><p>Para usar no computador e no celular com os mesmos dados, abra o endereço online e entre pelo Cloudflare Access. Use o e-mail autorizado; a própria tela mostrará como confirmar o acesso.</p><ol class="access-steps"><li><span>1</span><div><strong>Abra o painel publicado</strong><small>Ele termina em <code>.pages.dev</code>.</small></div></li><li><span>2</span><div><strong>Conclua o login do Cloudflare</strong><small>O painel não tem senha própria; o acesso é controlado pelo Cloudflare.</small></div></li><li><span>3</span><div><strong>Confira “Dados sincronizados online”</strong><small>Esse aviso confirma que o banco compartilhado carregou.</small></div></li></ol><a class="primary-btn" href="https://central-comercial-ia.pages.dev/" target="_blank" rel="noopener noreferrer">Abrir painel online e entrar ↗</a><p class="access-data-note">Os dados salvos neste localhost não são copiados automaticamente para o painel online. O botão “Exportar dados” cria um backup local.</p></article>`
+      ? `<article class="settings-card access-guide"><span class="status-badge green">Painel local</span><h2>IAs e WhatsApp neste computador</h2><p>Conecte seu WhatsApp pelo QR Code abaixo. O executor Codex prepara análises e respostas usando seu plano. Seus dados ficam neste navegador.</p><button type="button" class="ghost-btn" data-page="operations">Ver integrações e tarefas</button></article>`
       : online
         ? `<article class="settings-card access-guide access-guide-online"><span class="status-badge green">Acesso confirmado</span><h2>Você está no painel sincronizado</h2><p>Seu login foi aceito e os dados foram carregados do banco online. Acesse este mesmo endereço no computador e no celular para compartilhar o CRM.</p><a class="ghost-btn" href="https://central-comercial-ia.pages.dev/" target="_blank" rel="noopener noreferrer">Abrir endereço online ↗</a></article>`
         : `<article class="settings-card access-guide access-guide-pending"><span class="status-badge ${remoteConnectionState === 'login-required' ? 'yellow' : 'blue'}">${remoteConnectionState === 'login-required' ? 'Login não confirmado' : remoteConnectionState === 'unavailable' ? 'Conexão pendente' : 'Conectando'}</span><h2>${remoteConnectionState === 'login-required' ? 'Entre para carregar seus dados' : 'Carregando o painel online'}</h2><p>${remoteConnectionState === 'login-required' ? 'Conclua o acesso na tela do Cloudflare Access. Use o e-mail autorizado e volte a esta página. Seus dados online só aparecem depois da confirmação.' : remoteConnectionState === 'unavailable' ? 'Não foi possível alcançar o banco online. Confira a conexão e tente novamente.' : 'Estamos validando seu acesso e buscando os dados compartilhados.'}</p><button class="ghost-btn" type="button" data-action="retry-online">Tentar novamente</button></article>`;
@@ -1073,21 +1136,26 @@ function renderServices() { return `${pageHeader('Catálogo comercial', 'Uma ofe
       return `<div class="whatsapp-config-row"><code>${esc(key)}</code><span>${esc(label)}</span><strong class="status-badge ${ready ? 'green' : isLocalHost ? 'blue' : 'yellow'}">${statusText}</strong></div>`;
     }).join('');
     const webhookUrl = online ? whatsappStatus.webhookUrl : 'Disponível no domínio publicado do painel';
-    return `${pageHeader(online ? 'Painel online' : isLocalHost ? 'Acesso e dados' : 'Painel online', online ? 'Seus dados estão sincronizados.' : isLocalHost ? 'Entre para continuar no celular.' : remoteConnectionState === 'login-required' ? 'Faça login para ver seus dados.' : 'Conectando ao banco online.', online ? 'O CRM está carregado e pode ser usado em outros dispositivos pelo mesmo endereço.' : isLocalHost ? 'Use o link online e entre com o acesso autorizado do Cloudflare.' : 'Esta tela mostra o estado do login e da conexão com seus dados.')}
+    return `${pageHeader(online ? 'Painel online' : isLocalHost ? 'Acesso e dados' : 'Painel online', online ? 'Seus dados estão sincronizados.' : isLocalHost ? 'Conecte seu WhatsApp e organize o trabalho.' : remoteConnectionState === 'login-required' ? 'Faça login para ver seus dados.' : 'Conectando ao banco online.', online ? 'O CRM está carregado e pode ser usado em outros dispositivos pelo mesmo endereço.' : isLocalHost ? 'Este é o painel local com as IAs do Codex. Conecte seu celular para trazer as conversas dos leads.' : 'Esta tela mostra o estado do login e da conexão com seus dados.')}
       <div class="settings-grid">${accessCard}<article class="settings-card"><h2>${online ? 'Armazenamento online' : 'Backup deste dispositivo'}</h2><p>${online ? 'Leads, projetos e mensagens são carregados do Cloudflare D1 e atualizados após cada alteração.' : 'Exportar cria uma cópia de segurança dos dados deste navegador. Esse arquivo não transfere os dados automaticamente para o painel online.'}</p><div class="settings-actions"><button class="primary-btn" data-action="export">↓ Exportar backup</button>${isLocalHost ? '' : '<button class="ghost-btn" data-action="reset">Restaurar demonstração</button>'}</div></article>
-      <article class="settings-card whatsapp-settings"><div class="whatsapp-settings-heading"><div><h2>WhatsApp oficial</h2><p>Conexão pela WhatsApp Business Platform da Meta. Não usa QR nem acessa sua sessão pessoal.</p></div><span class="status-badge ${whatsappStatus.connected ? 'green' : isLocalHost ? 'blue' : 'yellow'}">${whatsappStatus.connected ? 'API conectada' : isLocalHost ? 'Consulte no online' : 'Configuração pendente'}</span></div>
+      ${isLocalHost ? '<article class="settings-card"><h2>WhatsApp local</h2><p>A conexão por QR e o estado da sessão ficam na área WhatsApp do menu.</p><button type="button" class="primary-btn" data-page="whatsapp">Abrir WhatsApp</button></article>' : `<article class="settings-card whatsapp-settings"><div class="whatsapp-settings-heading"><div><h2>WhatsApp oficial</h2><p>Conexão oficial pela WhatsApp Business Platform da Meta.</p></div><span class="status-badge ${whatsappStatus.connected ? 'green' : isLocalHost ? 'blue' : 'yellow'}">${whatsappStatus.connected ? 'API conectada' : isLocalHost ? 'Consulte no online' : 'Configuração pendente'}</span></div>
         ${isLocalHost ? '<p>O webhook e o envio oficial ficam disponíveis no domínio online publicado, não no localhost.</p>' : ''}
         <div class="whatsapp-config-list">${configRows}</div><div class="whatsapp-webhook"><span>URL do webhook</span><code>${esc(webhookUrl)}</code></div>
         <p>Adicione os itens pendentes em Cloudflare → Workers & Pages → projeto Central Comercial IA → Settings → Variables and Secrets. Marque os cinco valores Meta como secrets; a versão da API pode ser uma variável comum. Esta tela nunca pede nem exibe o token.</p>
         <p class="modal-note">A caixa de entrada sincroniza automaticamente. O painel só envia uma resposta depois que você clicar e dentro da janela de atendimento de 24 horas. Fora dela, a Meta exige um modelo aprovado e autorização do contato; o envio de prospecção fria fica bloqueado.</p>
         <div class="settings-actions"><a class="ghost-btn" href="https://developers.facebook.com/" target="_blank" rel="noopener noreferrer">Abrir Meta for Developers ↗</a><a class="ghost-btn" href="https://whatsappbusiness.com/developers/developer-hub/" target="_blank" rel="noopener noreferrer">Ver guia oficial ↗</a></div>
-      </article><article class="settings-card"><h2>Integrações</h2><p>Pesquisa no Google Maps e geração de mensagens continuam assistidas pela IA; conferência e decisão de contato seguem no seu controle.</p><div class="settings-actions"><span class="status-badge yellow">Pesquisa assistida</span><span class="status-badge ${whatsappStatus.connected ? 'green' : 'yellow'}">${whatsappStatus.connected ? 'WhatsApp API ativa' : 'WhatsApp pendente'}</span></div></article><article class="settings-card"><h2>Dados de demonstração</h2><p>${state.settings?.demo ? 'Os primeiros registros foram criados como exemplo e podem ser editados ou apagados pelo uso normal.' : 'Você está usando seus próprios registros.'}</p><div class="settings-actions"><span class="tag">${state.leads.length} leads</span><span class="tag">${state.projects.length} projetos</span><span class="tag">${state.messages.length} mensagens</span></div></article></div>`;
+      </article>`}<article class="settings-card"><h2>Integrações</h2><p>Pesquisa no Google Maps e geração de mensagens continuam assistidas pela IA; conferência e decisão de contato seguem no seu controle.</p><div class="settings-actions"><span class="status-badge yellow">Pesquisa assistida</span><span class="status-badge ${whatsappStatus.connected ? 'green' : 'yellow'}">${whatsappStatus.connected ? (isLocalHost ? 'WhatsApp local ativo' : 'WhatsApp API ativa') : 'WhatsApp pendente'}</span></div></article><article class="settings-card"><h2>Dados de demonstração</h2><p>${state.settings?.demo ? 'Os primeiros registros foram criados como exemplo e podem ser editados ou apagados pelo uso normal.' : 'Você está usando seus próprios registros.'}</p><div class="settings-actions"><span class="tag">${state.leads.length} leads</span><span class="tag">${state.projects.length} projetos</span><span class="tag">${state.messages.length} mensagens</span></div></article></div>`;
   }
 
 function bindShellEvents() { all('[data-page]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.page))); all('[data-action="new-lead"]').forEach((button) => button.addEventListener('click', openLeadModal)); all('[data-action="export"]').forEach((button) => button.addEventListener('click', exportData)); all('[data-action="toggle-theme"]').forEach((button) => button.addEventListener('click', toggleTheme)); }
 function bindPageEvents() {
-  all('[data-page]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.page)));
-  all('[data-action="new-lead"]').forEach((button) => button.addEventListener('click', openLeadModal));
+  operations.bind();
+  all('[data-enable-agenda-notifications]').forEach(button => button.addEventListener('click', operations.enableNotifications));
+  all('[data-wa-conversation]').forEach(button => button.addEventListener('click', () => { currentLeadId=button.dataset.waConversation; currentMessageId=messageByLead(currentLeadId)?.id; navigate('messages'); }));
+  all('[data-wa-local]').forEach(button => button.addEventListener('click', () => localWhatsAppAction(button.dataset.waLocal)));
+  all('[data-action="send-local-initial"]').forEach(button => button.addEventListener('click', () => sendLocalInitial(button.dataset.messageId)));
+  all('#pages [data-page]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.page)));
+  all('#pages [data-action="new-lead"]').forEach((button) => button.addEventListener('click', openLeadModal));
   all('[data-action="new-project"]').forEach((button) => button.addEventListener('click', openProjectModal));
   all('[data-action="new-calendar-item"]').forEach((button) => button.addEventListener('click', openCalendarItemModal));
   all('[data-action="import-crm-json"]').forEach((button) => button.addEventListener('click', openCRMJsonImportModal));
@@ -1144,7 +1212,7 @@ function bindPageEvents() {
     const form = el('#customer-reply-form');
     if (latest && input && form) { input.value = latest.text; form.requestSubmit(); }
   }));
-  all('[data-action="export"]').forEach((button) => button.addEventListener('click', exportData));
+  all('#pages [data-action="export"]').forEach((button) => button.addEventListener('click', exportData));
   all('[data-action="reset"]').forEach((button) => button.addEventListener('click', resetData));
   all('[data-action="retry-online"]').forEach((button) => button.addEventListener('click', () => { remoteConnectionState = 'checking'; renderShell(); renderPages(); void hydrateRemoteState(); }));
   all('[data-agent-id]').forEach((button) => button.addEventListener('click', () => { selectedAgentId = button.dataset.agentId; renderPages(); }));
@@ -1166,11 +1234,12 @@ async function refreshAgentRuntime(shouldRender = true) {
     agentRuntime = await response.json();
     autoImportProspectingRuns();
     if (assistantOpen && wasConnected !== agentRuntime.connected) renderAssistant();
-    if (shouldRender && currentPage === 'agents') renderPages();
+    if ((shouldRender && currentPage === 'agents') || (wasConnected !== agentRuntime.connected && ['operations','messages','settings'].includes(currentPage))) renderPages();
   } catch {
     agentRuntime = { ...agentRuntime, connected: false };
     if (assistantOpen && wasConnected) renderAssistant();
-    if (shouldRender && currentPage === 'agents') renderPages();
+    if (wasConnected && ['operations','messages','settings'].includes(currentPage)) renderPages();
+    if ((shouldRender && currentPage === 'agents') || (wasConnected !== agentRuntime.connected && ['operations','messages','settings'].includes(currentPage))) renderPages();
   }
 }
 
@@ -1291,7 +1360,7 @@ async function runAgents() {
 async function importAgentDataset(event) {
   return importCRMJsonFile(event);
 }
-function navigate(page) { currentPage = page; renderShell(); renderPages(); if (page === 'messages') void refreshWhatsAppInbox(); if (page === 'settings') void refreshWhatsAppStatus(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+function navigate(page) { if (!validPages.includes(page)) return; currentPage = page; history.replaceState(null, '', `#${page}`); renderShell(); renderPages(); if (['messages','whatsapp'].includes(page)) void refreshWhatsAppInbox(); if (['settings','whatsapp'].includes(page)) void refreshWhatsAppStatus(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
 function toggleTheme() { state.settings.theme = state.settings.theme === 'light' ? 'dark' : 'light'; persist(); applyTheme(); renderShell(); renderPages(); toast(state.settings.theme === 'light' ? 'Modo claro ativado.' : 'Modo escuro ativado.'); }
 
 function initialWhatsAppMessage(lead) {
@@ -1530,6 +1599,7 @@ function renderLeadWorkflow(lead, message, project, instagramStatus, instagramAc
     nextText = lead.stage === 'perdido' ? 'Se a empresa voltar a demonstrar interesse, você pode reabrir a oportunidade.' : 'Este lead foi marcado para não receber novos contatos.';
     nextAction = lead.stage === 'perdido' ? '<button type="button" class="flow-secondary" data-flow-stage="qualificado">Reabrir oportunidade</button>' : '';
   }
+  if (!project && !CLOSED_LEAD_STAGES.includes(lead.stage)) nextText = (lead.aiNextStepStage === lead.stage ? lead.aiNextStep : '') || operations.instruction(lead) || nextText;
   const salesStages = [...COMMERCIAL_PROGRESS_STAGES, ['venda-confirmada', 'Venda confirmada']];
   const currentSalesStep = project || lead.stage === 'ganho' ? salesStages.length : ({ novo: 0, verificar: 0, qualificado: 1, mensagem: 2, aprovacao: 2, contatado: 4, respondeu: 4, interessado: 5, proposta: 6, negociacao: 6 }[lead.stage] ?? 0);
   const salesProgress = ['perdido', 'nao-contatar'].includes(lead.stage) && !project ? '' : `<div class="flow-project-progress"><strong>Prospecção e venda · etapa ${Math.min(currentSalesStep + 1, salesStages.length)} de ${salesStages.length}${currentSalesStep === salesStages.length ? ' · concluída' : ''}</strong>${salesStages.map(([stage, label], index) => { const done = index < currentSalesStep; const current = index === currentSalesStep; return `<div class="flow-project-step ${done ? 'complete' : current ? 'current' : ''}"><span class="flow-marker">${done ? '✓' : current ? '●' : index + 1}</span><span>${label}</span></div>`; }).join('')}</div>`;
@@ -1741,6 +1811,7 @@ function confirmFollowUpSent(id) {
   message.conversation.push({ role: 'operador', status: 'enviada', text, createdAt: sentAt, sentAt, source: 'manual-follow-up' });
   lead.responseDue = daysFromNow(7);
   clearLeadFollowUp(lead.id, 'done');
+  operations.sent(lead.id);
   persist();
   renderPages();
   toast('Retomada registrada. O prazo de retorno agora é de 7 dias corridos.');
@@ -1810,17 +1881,20 @@ function markCustomerReplySent(id) {
   suggestion.status = 'enviada';
   suggestion.sentAt = isoDate(Date.now());
   const lead = leadById(message.leadId);
+  operations.sent(message.leadId);
   if (lead && ['contatado', 'respondeu'].includes(lead.stage)) lead.stage = 'respondeu';
   if (lead && !['ganho', 'perdido', 'nao-contatar'].includes(lead.stage)) lead.responseDue = daysFromNow(7);
   persist();
   renderPages();
   toast(lead && !['ganho', 'perdido', 'nao-contatar'].includes(lead.stage) ? 'Resposta enviada manualmente. Novo prazo de retorno: 7 dias corridos.' : 'Resposta registrada como enviada por você.');
 }
-function confirmSent(id) { const message = state.messages.find((item) => item.id === id); if (!message) return; const firstConfirmation = !message.sentAt; message.sentAt = message.sentAt || isoDate(Date.now()); const lead = leadById(message.leadId); if (lead) { if (['novo', 'verificar', 'qualificado', 'mensagem', 'aprovacao'].includes(lead.stage)) lead.stage = 'contatado'; if (!['ganho', 'perdido', 'nao-contatar'].includes(lead.stage)) { if (firstConfirmation) lead.responseDue = daysFromNow(7); if (firstConfirmation) scheduleLeadFollowUp(message, lead, Date.parse(message.sentAt)); } } persist(); renderPages(); toast(firstConfirmation ? 'Envio registrado. Lembrete de retomada em 3 dias e prazo de encerramento em 7 dias.' : 'O envio manual já estava registrado.'); }
+function confirmSent(id) { const message = state.messages.find((item) => item.id === id); if (!message) return; const firstConfirmation = !message.sentAt; message.sentAt = message.sentAt || isoDate(Date.now()); const lead = leadById(message.leadId); if (lead) { if (['novo', 'verificar', 'qualificado', 'mensagem', 'aprovacao'].includes(lead.stage)) lead.stage = 'contatado'; if (!['ganho', 'perdido', 'nao-contatar'].includes(lead.stage)) { if (firstConfirmation) lead.responseDue = daysFromNow(7); if (firstConfirmation) { scheduleLeadFollowUp(message, lead, Date.parse(message.sentAt)); operations.sent(lead.id); } } } persist(); renderPages(); toast(firstConfirmation ? `Envio registrado. Retomada em ${operations.followUpDelay()} dias e encerramento em 7 dias sem resposta.` : 'O envio manual já estava registrado.'); }
 function exportData() { const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `central-comercial-${new Date().toISOString().slice(0, 10)}.json`; anchor.click(); URL.revokeObjectURL(url); toast('Backup JSON exportado.'); }
 function resetData() { if (!confirm('Restaurar os dados de demonstração? Seus registros locais atuais serão substituídos.')) return; state = seedState(); currentLeadId = state.leads[0]?.id; currentMessageId = state.messages[0]?.id; persist(); renderPages(); toast('Dados de demonstração restaurados.'); }
 function toast(message) { const node = el('#toast'); if (!node) return; node.textContent = message; node.classList.add('show'); clearTimeout(window.__toastTimer); window.__toastTimer = setTimeout(() => node.classList.remove('show'), 3400); }
 
+const operations = createOperations({ getState: () => state, save: persist, refresh: renderPages, toast, stages: LEAD_STAGES, aiAvailable: () => isLocalHost && agentRuntime.connected, stageLabel, modal, closeModal, chat: text => { assistantOpen = true; renderAssistant(); void sendAssistantMessage(text); }, openConversation: id => { currentLeadId = id; currentMessageId = messageByLead(id)?.id; navigate('messages'); } });
+operations.track();
 applyTheme();
 renderShell();
 renderPages();
@@ -1850,5 +1924,14 @@ refreshAgentRuntime(false);
 if (!isLocalHost) {
   void refreshWhatsAppStatus();
   setInterval(() => { if (document.visibilityState === 'visible' && remoteHydrated) void refreshWhatsAppInbox(); }, 20000);
-  setInterval(() => { if (document.visibilityState === 'visible' && (currentPage === 'messages' || currentPage === 'settings')) void refreshWhatsAppStatus(); }, 60000);
+  setInterval(() => { if (document.visibilityState === 'visible' && ['messages','settings','whatsapp'].includes(currentPage)) void refreshWhatsAppStatus(); }, 60000);
 }
+
+if (isLocalHost) {
+  void refreshWhatsAppStatus();
+  setInterval(() => { if (document.visibilityState === 'visible') { void refreshWhatsAppStatus(); void refreshWhatsAppInbox(); } }, 3000);
+}
+
+setInterval(() => operations.notifyDue(), 60000);
+
+setInterval(() => { if (isLocalHost && document.visibilityState === 'visible' && currentPage !== 'agents') void refreshAgentRuntime(false); }, 10000);
