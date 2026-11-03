@@ -120,6 +120,7 @@ const AGENT_ROLES = [
 ];
 
 const isLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+let remoteConnectionState = isLocalHost ? 'local' : 'checking';
 
 function loadState() {
   try {
@@ -201,9 +202,17 @@ function closeExpiredUnansweredLeads(data, now = Date.now()) {
 }
 async function hydrateRemoteState() {
   if (isLocalHost) return;
+  remoteConnectionState = 'checking';
   try {
     const response = await fetch('/api/state', { credentials: 'include' });
-    if (!response.ok) throw new Error(`state_${response.status}`);
+    if (!response.ok) {
+      remoteConnectionState = [401, 403].includes(response.status) ? 'login-required' : 'unavailable';
+      throw new Error(`state_${response.status}`);
+    }
+    if (!response.headers.get('content-type')?.includes('application/json')) {
+      remoteConnectionState = 'login-required';
+      throw new Error('A sessão do Cloudflare Access precisa ser concluída.');
+    }
     const payload = await response.json();
     const hasRemoteState = Boolean(payload.state);
     let automaticallyClosed = 0;
@@ -224,6 +233,9 @@ async function hydrateRemoteState() {
       renderPages();
     }
     remoteHydrated = true;
+    remoteConnectionState = 'connected';
+    renderShell();
+    renderPages();
     if (!hasRemoteState) await syncRemoteState();
     else {
       persist();
@@ -234,7 +246,10 @@ async function hydrateRemoteState() {
     toast('Dados sincronizados com o Cloudflare.');
   } catch (error) {
     console.warn('Sincronização remota indisponível.', error);
-    toast('Banco online ainda não disponível; usando dados locais.');
+    if (remoteConnectionState === 'checking') remoteConnectionState = 'unavailable';
+    renderShell();
+    renderPages();
+    toast(remoteConnectionState === 'login-required' ? 'Faça login pelo Cloudflare Access para carregar os dados online.' : 'Não foi possível conectar ao banco online. Tente novamente em instantes.');
   }
 }
 async function syncRemoteState() {
@@ -398,7 +413,7 @@ function renderShell() {
           ${navItem('services', '◇', 'Serviços')}
           ${navItem('settings', '⚙', 'Configurações')}
         </nav></div>
-        <div class="sidebar-footer"><div class="mini-status"><span class="status-dot"></span>${isLocalHost ? 'Dados neste dispositivo' : remoteHydrated ? 'Dados sincronizados online' : 'Conectando ao banco'}</div><p>${isLocalHost ? 'Modo local de desenvolvimento. O endereço público usa o banco online.' : remoteHydrated ? 'Cloudflare D1 ativo. As alterações ficam disponíveis no computador e no celular.' : 'Validando sua sessão e carregando os dados do Cloudflare.'}</p></div>
+        <div class="sidebar-footer"><div class="mini-status"><span class="status-dot ${isLocalHost ? 'local' : remoteHydrated ? 'connected' : ['login-required', 'unavailable'].includes(remoteConnectionState) ? 'attention' : 'checking'}"></span>${isLocalHost ? 'Somente neste dispositivo' : remoteHydrated ? 'Dados sincronizados online' : remoteConnectionState === 'login-required' ? 'Login necessário' : remoteConnectionState === 'unavailable' ? 'Banco indisponível' : 'Conectando ao banco'}</div><p>${isLocalHost ? 'Este endereço local não compartilha dados com o celular.' : remoteHydrated ? 'Cloudflare D1 ativo. Use o mesmo endereço online nos seus dispositivos.' : remoteConnectionState === 'login-required' ? 'Conclua o login do Cloudflare Access para carregar seus dados.' : remoteConnectionState === 'unavailable' ? 'Confira sua conexão e tente atualizar a página.' : 'Validando seu acesso e carregando os dados online.'}</p>${isLocalHost ? '<a class="sidebar-online-link" href="https://central-comercial-ia.pages.dev/" target="_blank" rel="noopener noreferrer">Abrir painel online ↗</a>' : ''}</div>
       </aside>
       <main class="main">
         <header class="topbar"><div class="breadcrumb">Central <span>/</span> <strong id="breadcrumb-current">Visão geral</strong></div><div class="top-actions"><button class="ghost-btn theme-toggle" data-action="toggle-theme"><span class="theme-icon">☼</span><span class="theme-label">Modo claro</span></button><button class="ghost-btn" data-action="export">↓ Exportar dados</button><button class="primary-btn" data-action="new-lead">+ Novo lead</button></div></header>
@@ -989,6 +1004,11 @@ function renderServices() { return `${pageHeader('Catálogo comercial', 'Uma ofe
   <article class="service-card"><span class="status-badge green">Oferta ativa para teste</span><h2 style="margin-top:18px">Landing page para negócio local</h2><p class="lede">Uma presença digital objetiva para explicar o negócio e facilitar o contato.</p><div class="offer-price">R$ 297 <small>pagamento único</small></div><ul class="offer-list"><li>Criação de uma landing page responsiva</li><li>Hospedagem incluída por 1 ano</li><li>Layout para celular e computador</li><li>Botão de contato e apresentação do negócio</li></ul><div class="offer-extra"><strong style="color:var(--text-2)">Fora do escopo inicial</strong><br />Trocas, alterações de escopo e tempo adicional entram em uma nova cobrança posterior. Domínio, quantidade de revisões, textos, imagens e prazo padrão ainda precisam ser definidos.</div></article>`; }
   function renderSettings() {
     const online = !isLocalHost && remoteHydrated;
+    const accessCard = isLocalHost
+      ? `<article class="settings-card access-guide"><div class="access-guide-heading"><div><span class="status-badge yellow">Você está no painel local</span><h2>Entrar no painel online</h2></div></div><p>Para usar no computador e no celular com os mesmos dados, abra o endereço online e entre pelo Cloudflare Access. Use o e-mail autorizado; a própria tela mostrará como confirmar o acesso.</p><ol class="access-steps"><li><span>1</span><div><strong>Abra o painel publicado</strong><small>Ele termina em <code>.pages.dev</code>.</small></div></li><li><span>2</span><div><strong>Conclua o login do Cloudflare</strong><small>O painel não tem senha própria; o acesso é controlado pelo Cloudflare.</small></div></li><li><span>3</span><div><strong>Confira “Dados sincronizados online”</strong><small>Esse aviso confirma que o banco compartilhado carregou.</small></div></li></ol><a class="primary-btn" href="https://central-comercial-ia.pages.dev/" target="_blank" rel="noopener noreferrer">Abrir painel online e entrar ↗</a><p class="access-data-note">Os dados salvos neste localhost não são copiados automaticamente para o painel online. O botão “Exportar dados” cria um backup local.</p></article>`
+      : online
+        ? `<article class="settings-card access-guide access-guide-online"><span class="status-badge green">Acesso confirmado</span><h2>Você está no painel sincronizado</h2><p>Seu login foi aceito e os dados foram carregados do banco online. Acesse este mesmo endereço no computador e no celular para compartilhar o CRM.</p><a class="ghost-btn" href="https://central-comercial-ia.pages.dev/" target="_blank" rel="noopener noreferrer">Abrir endereço online ↗</a></article>`
+        : `<article class="settings-card access-guide access-guide-pending"><span class="status-badge ${remoteConnectionState === 'login-required' ? 'yellow' : 'blue'}">${remoteConnectionState === 'login-required' ? 'Login não confirmado' : remoteConnectionState === 'unavailable' ? 'Conexão pendente' : 'Conectando'}</span><h2>${remoteConnectionState === 'login-required' ? 'Entre para carregar seus dados' : 'Carregando o painel online'}</h2><p>${remoteConnectionState === 'login-required' ? 'Conclua o acesso na tela do Cloudflare Access. Use o e-mail autorizado e volte a esta página. Seus dados online só aparecem depois da confirmação.' : remoteConnectionState === 'unavailable' ? 'Não foi possível alcançar o banco online. Confira a conexão e tente novamente.' : 'Estamos validando seu acesso e buscando os dados compartilhados.'}</p><button class="ghost-btn" type="button" data-action="retry-online">Tentar novamente</button></article>`;
     const fields = [
       ['WHATSAPP_ACCESS_TOKEN', 'Token de acesso permanente', 'accessToken'],
       ['WHATSAPP_PHONE_NUMBER_ID', 'ID do número empresarial', 'phoneNumberId'],
@@ -999,12 +1019,13 @@ function renderServices() { return `${pageHeader('Catálogo comercial', 'Uma ofe
     ];
     const configRows = fields.map(([key, label, fieldKey]) => {
       const ready = online && whatsappStatus.fields?.[fieldKey];
-      return `<div class="whatsapp-config-row"><code>${esc(key)}</code><span>${esc(label)}</span><strong class="status-badge ${ready ? 'green' : 'yellow'}">${ready ? 'Configurado' : 'Pendente'}</strong></div>`;
+      const statusText = isLocalHost ? 'Só no online' : ready ? 'Configurado' : 'Pendente';
+      return `<div class="whatsapp-config-row"><code>${esc(key)}</code><span>${esc(label)}</span><strong class="status-badge ${ready ? 'green' : isLocalHost ? 'blue' : 'yellow'}">${statusText}</strong></div>`;
     }).join('');
     const webhookUrl = online ? whatsappStatus.webhookUrl : 'Disponível no domínio publicado do painel';
-    return `${pageHeader(online ? 'Dados sincronizados' : 'Controle local', online ? 'Seu painel acompanha você.' : 'Seus dados ficam neste dispositivo.', online ? 'Cloudflare D1 está conectado. O mesmo estado pode ser aberto no computador e no celular após o login.' : 'O endereço local salva tudo no navegador. O endereço público sincroniza os registros com o banco online.')}
-      <div class="settings-grid"><article class="settings-card"><h2>${online ? 'Armazenamento online' : 'Armazenamento local'}</h2><p>${online ? 'Leads, projetos e mensagens são carregados do Cloudflare D1 e atualizados após cada alteração.' : 'Os dados atuais estão salvos neste dispositivo e neste navegador. Eles serão sincronizados quando você usar o endereço público com login.'}</p><div class="settings-actions"><button class="primary-btn" data-action="export">↓ Exportar dados</button><button class="ghost-btn" data-action="reset">Restaurar demonstração</button></div></article>
-      <article class="settings-card whatsapp-settings"><div class="whatsapp-settings-heading"><div><h2>WhatsApp oficial</h2><p>Conexão pela WhatsApp Business Platform da Meta. Não usa QR nem acessa sua sessão pessoal.</p></div><span class="status-badge ${whatsappStatus.connected ? 'green' : 'yellow'}">${whatsappStatus.connected ? 'API conectada' : 'Configuração pendente'}</span></div>
+    return `${pageHeader(online ? 'Painel online' : isLocalHost ? 'Acesso e dados' : 'Painel online', online ? 'Seus dados estão sincronizados.' : isLocalHost ? 'Entre para continuar no celular.' : remoteConnectionState === 'login-required' ? 'Faça login para ver seus dados.' : 'Conectando ao banco online.', online ? 'O CRM está carregado e pode ser usado em outros dispositivos pelo mesmo endereço.' : isLocalHost ? 'Use o link online e entre com o acesso autorizado do Cloudflare.' : 'Esta tela mostra o estado do login e da conexão com seus dados.')}
+      <div class="settings-grid">${accessCard}<article class="settings-card"><h2>${online ? 'Armazenamento online' : 'Backup deste dispositivo'}</h2><p>${online ? 'Leads, projetos e mensagens são carregados do Cloudflare D1 e atualizados após cada alteração.' : 'Exportar cria uma cópia de segurança dos dados deste navegador. Esse arquivo não transfere os dados automaticamente para o painel online.'}</p><div class="settings-actions"><button class="primary-btn" data-action="export">↓ Exportar backup</button>${isLocalHost ? '' : '<button class="ghost-btn" data-action="reset">Restaurar demonstração</button>'}</div></article>
+      <article class="settings-card whatsapp-settings"><div class="whatsapp-settings-heading"><div><h2>WhatsApp oficial</h2><p>Conexão pela WhatsApp Business Platform da Meta. Não usa QR nem acessa sua sessão pessoal.</p></div><span class="status-badge ${whatsappStatus.connected ? 'green' : isLocalHost ? 'blue' : 'yellow'}">${whatsappStatus.connected ? 'API conectada' : isLocalHost ? 'Consulte no online' : 'Configuração pendente'}</span></div>
         ${isLocalHost ? '<p>O webhook e o envio oficial ficam disponíveis no domínio online publicado, não no localhost.</p>' : ''}
         <div class="whatsapp-config-list">${configRows}</div><div class="whatsapp-webhook"><span>URL do webhook</span><code>${esc(webhookUrl)}</code></div>
         <p>Adicione os itens pendentes em Cloudflare → Workers & Pages → projeto Central Comercial IA → Settings → Variables and Secrets. Marque os cinco valores Meta como secrets; a versão da API pode ser uma variável comum. Esta tela nunca pede nem exibe o token.</p>
@@ -1072,6 +1093,7 @@ function bindPageEvents() {
   }));
   all('[data-action="export"]').forEach((button) => button.addEventListener('click', exportData));
   all('[data-action="reset"]').forEach((button) => button.addEventListener('click', resetData));
+  all('[data-action="retry-online"]').forEach((button) => button.addEventListener('click', () => { remoteConnectionState = 'checking'; renderShell(); renderPages(); void hydrateRemoteState(); }));
   all('[data-agent-id]').forEach((button) => button.addEventListener('click', () => { selectedAgentId = button.dataset.agentId; renderPages(); }));
   all('[data-research-candidate]').forEach((checkbox) => checkbox.addEventListener('change', () => {
     const key = `${checkbox.dataset.researchRun}:${checkbox.dataset.researchCandidate}`;

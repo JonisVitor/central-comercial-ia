@@ -83,7 +83,11 @@ a { color: inherit; text-decoration: none; }
 .nav-item.active .nav-icon { color: var(--orange); }
 .sidebar-footer { margin-top: auto; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
 .mini-status { display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 12px; }
+.sidebar-online-link { display: inline-flex; margin-top: 10px; color: var(--orange); font-size: 12px; font-weight: 700; text-underline-offset: 3px; }
+.sidebar-online-link:hover { color: var(--text); }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px var(--green-soft); }
+.status-dot.local, .status-dot.checking { background: var(--blue); box-shadow: 0 0 0 4px var(--blue-soft); }
+.status-dot.attention { background: var(--yellow); box-shadow: 0 0 0 4px var(--yellow-soft); }
 .sidebar-footer p { margin: 11px 0 0; color: var(--text-4); font-size: 12px; line-height: 1.5; }
 
 .main { width: min(100%, 1440px); padding: 24px clamp(20px, 4vw, 58px) 72px; }
@@ -353,6 +357,20 @@ h3 { margin-bottom: 4px; font-size: 15px; }
 .settings-card { padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
 .settings-card p { color: var(--text-3); font-size: 12px; line-height: 1.5; }
 .settings-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 18px; }
+.access-guide { grid-column: 1 / -1; display: grid; justify-items: start; gap: 12px; }
+.access-guide h2 { margin: 0; }
+.access-guide > p { max-width: 74ch; margin: 0; }
+.access-guide > .status-badge { margin-bottom: 2px; }
+.access-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; width: 100%; margin: 2px 0 4px; padding: 0; list-style: none; }
+.access-steps li { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.access-steps li > span { display: grid; flex: 0 0 24px; width: 24px; height: 24px; place-items: center; border-radius: 50%; color: var(--orange); background: var(--orange-soft); font-size: 12px; font-weight: 700; }
+.access-steps li strong, .access-steps li small { display: block; }
+.access-steps li strong { color: var(--text); font-size: 12px; line-height: 1.4; }
+.access-steps li small { margin-top: 4px; color: var(--text-3); font-size: 11px; line-height: 1.45; }
+.access-steps code { color: var(--text-2); }
+.settings-card .access-data-note { padding-top: 11px; border-top: 1px solid var(--border); }
+.access-guide-online { align-content: start; }
+.access-guide-pending { border-color: var(--border-strong); }
 .whatsapp-settings { grid-column: 1 / -1; }
 .whatsapp-settings-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .whatsapp-settings-heading h2 { margin: 0; }
@@ -367,6 +385,7 @@ h3 { margin-bottom: 4px; font-size: 15px; }
 .whatsapp-connection-strip .detail-link { margin-left: auto; white-space: nowrap; }
 .whatsapp-settings .modal-note { margin-top: 14px; }
 @media (max-width: 780px) {
+  .access-steps { grid-template-columns: 1fr; }
   .whatsapp-config-list { grid-template-columns: 1fr; }
   .whatsapp-config-row { grid-template-columns: minmax(145px, auto) 1fr auto; }
   .whatsapp-connection-strip { align-items: flex-start; flex-wrap: wrap; }
