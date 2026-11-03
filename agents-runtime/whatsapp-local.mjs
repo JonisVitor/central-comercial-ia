@@ -48,7 +48,7 @@ async function connect() {
       const instance = new Client({ authStrategy: new LocalAuth({ dataPath: path.join(directory, 'session') }), webVersionCache: { type: 'local', path: path.join(directory, 'web-cache') }, puppeteer: { headless: true, executablePath }, qrMaxRetries: 8, authTimeoutMs: 120000 });
       client = instance;
       instance.on('qr', async value => { const data = await qr.toDataURL(value, { width: 288, margin: 2 }); if (token === generation) { qrDataUrl = data; state = 'qr'; } });
-      instance.on('authenticated', () => { if (token === generation) { state = 'authenticating'; qrDataUrl = ''; } });
+      instance.on('authenticated', () => { if (token === generation && state !== 'ready') { state = 'authenticating'; qrDataUrl = ''; } });
       instance.on('ready', () => { if (token === generation) { state = 'ready'; qrDataUrl = ''; account = instance.info?.wid?.user || ''; } });
       instance.on('auth_failure', () => { if (token === generation) { state = 'error'; error = 'Autenticação recusada. Desconecte e gere outro QR Code.'; qrDataUrl = ''; } });
       instance.on('disconnected', () => { if (token === generation) { state = 'disconnected'; qrDataUrl = ''; client = undefined; } void instance.destroy().catch(() => {}); });
