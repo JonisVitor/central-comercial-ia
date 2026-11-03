@@ -200,6 +200,48 @@ function closeExpiredUnansweredLeads(data, now = Date.now()) {
   }
   return closed;
 }
+function followUpReminderFor(leadId) {
+  return (state.calendarItems || []).find((item) => item.source === 'follow-up' && item.leadId === leadId && item.status === 'pending');
+}
+function scheduleLeadFollowUp(message, lead, sentAt = Date.now()) {
+  if (!message || !lead || lead.stage !== 'contatado' || message.followUpSentAt) return;
+  state.calendarItems ||= [];
+  const date = localDateKey(addLocalDays(new Date(sentAt), 3));
+  const item = followUpReminderFor(lead.id) || state.calendarItems.find((entry) => entry.source === 'follow-up' && entry.leadId === lead.id);
+  if (item) {
+    Object.assign(item, { date, title: `Retomar contato: ${lead.name}`, details: 'Confira se o cliente respondeu. Se não houver resposta, revise a sugestão na aba Conversas. A Central não envia mensagens automaticamente.', status: 'pending', updatedAt: isoDate(Date.now()) });
+  } else {
+    state.calendarItems.push({ id: `follow-up-${lead.id}`, title: `Retomar contato: ${lead.name}`, date, time: '', type: 'contato', details: 'Confira se o cliente respondeu. Se não houver resposta, revise a sugestão na aba Conversas. A Central não envia mensagens automaticamente.', leadId: lead.id, leadName: lead.name, status: 'pending', source: 'follow-up', createdAt: isoDate(Date.now()) });
+  }
+}
+function initializeFollowUpReminders() {
+  if (state.followUpRemindersInitialized) return false;
+  let added = false;
+  const now = Date.now();
+  for (const lead of state.leads || []) {
+    if (lead.stage !== 'contatado') continue;
+    const message = messageByLead(lead.id);
+    if (!message?.sentAt || message.followUpSentAt || message.conversation?.some((item) => item.role === 'cliente')) continue;
+    if ((state.calendarItems || []).some((item) => item.source === 'follow-up' && item.leadId === lead.id)) continue;
+    const sentTimes = [message.sentAt, ...(message.conversation || []).filter((item) => item.role === 'operador' && item.status === 'enviada').map((item) => item.sentAt)].filter(Boolean).map(Date.parse).filter(Number.isFinite);
+    const lastSent = sentTimes.length ? Math.max(...sentTimes) : NaN;
+    if (!Number.isFinite(lastSent) || now >= lastSent + 7 * 86400000) continue;
+    scheduleLeadFollowUp(message, lead, Math.max(lastSent, now - 3 * 86400000));
+    added = true;
+  }
+  state.followUpRemindersInitialized = true;
+  persist();
+  return added;
+}
+function clearLeadFollowUp(leadId, status = 'done') {
+  const item = followUpReminderFor(leadId);
+  if (!item) return;
+  item.status = status;
+  item.updatedAt = isoDate(Date.now());
+}
+function followUpText(lead) {
+  return `Oi, tudo bem? Só retomando minha mensagem anterior. Você conseguiu dar uma olhada? Se fizer sentido, posso te mandar uma ideia breve para apresentar melhor os serviços da ${lead?.name || 'empresa'} online.`;
+}
 async function hydrateRemoteState() {
   if (isLocalHost) return;
   remoteConnectionState = 'checking';
@@ -225,6 +267,7 @@ async function hydrateRemoteState() {
       ensureLeadPresenceFields(state);
       ensureLeadDrafts(state);
       automaticallyClosed = closeExpiredUnansweredLeads(state);
+      initializeFollowUpReminders();
       currentLeadId = state.leads[0]?.id;
       currentMessageId = state.messages[0]?.id;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -302,6 +345,7 @@ async function refreshWhatsAppInbox() {
       if (item.direction === 'inbound' && !['ganho', 'perdido', 'nao-contatar'].includes(lead.stage)) {
         lead.stage = 'respondeu';
         lead.responseDue = null;
+        clearLeadFollowUp(lead.id);
       }
       changed = true;
     }
@@ -816,12 +860,12 @@ function renderCalendarCellEvent(event) {
     return `<button type="button" class="calendar-event ${tone}" data-project-id="${esc(project.id)}" title="Entrega · ${esc(project.name)} · ${esc(stageLabel(project.stage, PROJECT_STAGES))}"><strong>${esc(project.name)}</strong><span>${finished ? 'Entregue' : 'Entrega · ' + esc(count.text)}</span></button>`;
   }
   const item = event.item;
-  const typeLabel = { reuniao: 'Reunião', entrega: 'Entrega', contato: 'Contato', tarefa: 'Tarefa' }[item.type] || 'Tarefa';
+  const typeLabel = item.source === 'follow-up' ? 'Retomar contato' : ({ reuniao: 'Reunião', entrega: 'Entrega', contato: 'Contato', tarefa: 'Tarefa' }[item.type] || 'Tarefa');
   return `<button type="button" class="calendar-event agenda-${esc(item.type || 'tarefa')} ${item.status === 'done' ? 'completed' : ''}" data-agenda-id="${esc(item.id)}" title="${esc(typeLabel)} · ${esc(item.title)}"><strong>${item.time ? `${esc(item.time)} · ` : ''}${esc(item.title)}</strong><span>${esc(typeLabel)}${item.status === 'done' ? ' · Concluída' : ''}</span></button>`;
 }
 
 function renderCalendarAgendaRow(item) {
-  const typeLabel = { reuniao: 'Reunião', entrega: 'Entrega', contato: 'Contato', tarefa: 'Tarefa' }[item.type] || 'Tarefa';
+  const typeLabel = item.source === 'follow-up' ? 'Retomar contato' : ({ reuniao: 'Reunião', entrega: 'Entrega', contato: 'Contato', tarefa: 'Tarefa' }[item.type] || 'Tarefa');
   return `<button type="button" class="calendar-agenda-item calendar-task-row ${item.status === 'done' ? 'completed' : ''}" data-agenda-id="${esc(item.id)}"><span class="calendar-agenda-date">${item.time ? esc(item.time) : typeLabel}</span><span class="calendar-agenda-copy"><strong>${esc(item.title)}</strong><small>${esc(item.projectName || item.leadName || item.details || typeLabel)}</small></span><span class="calendar-agenda-count">${item.status === 'done' ? 'Concluída' : 'Abrir'}</span></button>`;
 }
 
@@ -863,13 +907,14 @@ function openCalendarItemDetail(id) {
   const lead = leadById(item.leadId);
   const day = dateFromLocalKey(item.date);
   const dateLabel = day ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'full' }).format(day) : item.date;
-  const typeLabel = { reuniao: 'Reunião', entrega: 'Entrega', contato: 'Contato', tarefa: 'Tarefa' }[item.type] || 'Tarefa';
+  const typeLabel = item.source === 'follow-up' ? 'Retomar contato' : ({ reuniao: 'Reunião', entrega: 'Entrega', contato: 'Contato', tarefa: 'Tarefa' }[item.type] || 'Tarefa');
   const statusLabel = item.status === 'done' ? 'Concluída' : 'Pendente';
-  modal(`<div class="modal-header"><div><p class="page-kicker">${esc(typeLabel)} · ${esc(statusLabel)}</p><h2>${esc(item.title)}</h2><p>${esc(dateLabel)}${item.time ? ` · ${esc(item.time)}` : ''}</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div>${item.details ? `<p class="modal-note">${esc(item.details)}</p>` : ''}${project ? `<div class="agenda-linked-project"><strong>Projeto · ${esc(project.name)}</strong><p>${esc(project.aiSummary || project.notes || `${project.service} · ${stageLabel(project.stage, PROJECT_STAGES)}`)}</p><button type="button" class="text-btn" data-open-linked-project>Ver projeto →</button></div>` : ''}${lead ? `<p class="field-help">Lead relacionado: ${esc(lead.name)}</p>` : ''}<div class="modal-actions">${item.status !== 'done' ? '<button class="primary-btn" type="button" data-agenda-complete>Marcar como concluída</button>' : '<button class="ghost-btn" type="button" data-agenda-reopen>Reabrir tarefa</button>'}<button class="ghost-btn" type="button" data-agenda-cancel>Remover da agenda</button></div>`);
+  modal(`<div class="modal-header"><div><p class="page-kicker">${esc(typeLabel)} · ${esc(statusLabel)}</p><h2>${esc(item.title)}</h2><p>${esc(dateLabel)}${item.time ? ` · ${esc(item.time)}` : ''}</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div>${item.details ? `<p class="modal-note">${esc(item.details)}</p>` : ''}${project ? `<div class="agenda-linked-project"><strong>Projeto · ${esc(project.name)}</strong><p>${esc(project.aiSummary || project.notes || `${project.service} · ${stageLabel(project.stage, PROJECT_STAGES)}`)}</p><button type="button" class="text-btn" data-open-linked-project>Ver projeto →</button></div>` : ''}${lead ? `<p class="field-help">Lead relacionado: ${esc(lead.name)}</p>` : ''}${item.source === 'follow-up' ? '<button type="button" class="ghost-btn" data-open-follow-up-conversation>Abrir conversa do lead</button>' : ''}<div class="modal-actions">${item.status !== 'done' ? '<button class="primary-btn" type="button" data-agenda-complete>Marcar como concluída</button>' : '<button class="ghost-btn" type="button" data-agenda-reopen>Reabrir tarefa</button>'}<button class="ghost-btn" type="button" data-agenda-cancel>Remover da agenda</button></div>`);
   el('[data-agenda-complete]')?.addEventListener('click', () => updateCalendarItem(id, 'done'));
   el('[data-agenda-reopen]')?.addEventListener('click', () => updateCalendarItem(id, 'pending'));
   el('[data-agenda-cancel]')?.addEventListener('click', () => { if (confirm('Remover este item da agenda?')) updateCalendarItem(id, 'cancelled'); });
   el('[data-open-linked-project]')?.addEventListener('click', () => openProjectDetail(project.id));
+  el('[data-open-follow-up-conversation]')?.addEventListener('click', () => { currentLeadId = lead?.id; currentMessageId = messageByLead(lead?.id)?.id || currentMessageId; closeModal(); navigate('messages'); });
 }
 
 function updateCalendarItem(id, status) {
@@ -979,11 +1024,16 @@ function renderMessages() {
   const conversationLog = conversation.length ? `<div class="reply-history" aria-label="Histórico da conversa">${conversation.map((item) => { const suggestion = item.role === 'sugestao' && item.status !== 'enviada'; const text = suggestion ? removeEmojis(item.text) : item.text; return `<article class="reply-bubble ${item.role === 'cliente' ? 'client' : item.role === 'operador' || item.status === 'enviada' ? 'operator' : 'suggestion'}" ${suggestion ? 'role="note" aria-label="Resposta da IA, ainda não enviada"' : ''}><strong>${item.role === 'cliente' ? 'Cliente' : item.role === 'operador' || item.status === 'enviada' ? 'Você · enviada' : 'Resposta da IA · não enviada'}</strong><p>${esc(text).replace(/\n/g, '<br>')}</p></article>`; }).join('')}</div>` : '<p class="muted reply-empty">As respostas do cliente e os rascunhos sugeridos aparecerão aqui.</p>';
   const suggestedReply = latestSuggestion ? `<label class="field reply-suggestion-field"><span>Resposta sugerida — revise antes de copiar</span><textarea class="field-textarea" id="customer-reply-suggestion">${esc(removeEmojis(latestSuggestion.text))}</textarea></label><div class="message-actions"><button type="button" class="primary-btn" data-action="copy-customer-reply" data-message-id="${current.id}">Copiar resposta</button><button type="button" class="ghost-btn" data-action="send-customer-reply" data-message-id="${current.id}" ${!whatsappStatus.connected || whatsappSending ? 'disabled' : ''}>${whatsappSending ? 'Enviando…' : 'Enviar pelo WhatsApp oficial'}</button></div>` : '';
   const latestIsCustomer = conversation.at(-1)?.role === 'cliente';
+  const followUpItem = current && followUpReminderFor(current.leadId);
+  const hasFollowUp = Boolean(current?.sentAt && lead?.stage === 'contatado' && !latestIsCustomer && followUpItem && !current.followUpSentAt);
+  const followUpIsDue = Boolean(followUpItem && followUpItem.date <= localDateKey(today()));
+  const followUpComposer = hasFollowUp && followUpIsDue ? `<section class="follow-up-coach"><div><p class="page-kicker">PRÓXIMO PASSO · ${esc(formatDate(followUpItem.date))}</p><h3>Retomar contato</h3><p>Revise o texto e envie você mesmo, se fizer sentido. A Central não dispara mensagens.</p></div><label class="field"><span>Sugestão de mensagem</span><textarea class="field-textarea" id="follow-up-text" maxlength="1200">${esc(current.followUpDraft || followUpText(lead))}</textarea></label><div class="message-actions"><button type="button" class="primary-btn" data-action="copy-follow-up" data-message-id="${current.id}">Copiar mensagem</button><button type="button" class="ghost-btn" data-action="open-follow-up-whatsapp" data-message-id="${current.id}">Abrir WhatsApp</button><button type="button" class="ghost-btn" data-action="confirm-follow-up" data-message-id="${current.id}">Já enviei manualmente</button></div><p class="modal-note">O lembrete será concluído quando você confirmar o envio ou quando o cliente responder.</p></section>` : '';
+  const followUpScheduled = hasFollowUp && !followUpIsDue ? `<section class="follow-up-coach follow-up-scheduled"><div><p class="page-kicker">PRÓXIMO PASSO · AGENDADO</p><h3>Retomar contato em ${esc(formatDate(followUpItem.date))}</h3><p>A Central vai deixar o lembrete no calendário. A mensagem só ficará disponível para revisão no dia agendado.</p></div><button type="button" class="ghost-btn" data-page="calendar">Ver no calendário →</button></section>` : '';
   const analyzeLatest = latestIsCustomer ? `<button type="button" class="ghost-btn" data-action="analyze-latest-customer" ${customerReplyBusy || !agentRuntime.connected ? 'disabled' : ''}>${customerReplyBusy ? 'Analisando…' : 'Analisar última mensagem recebida'}</button>` : '';
   const connectionNote = `<div class="whatsapp-connection-strip"><span class="status-badge ${whatsappStatus.connected ? 'green' : 'yellow'}">${whatsappStatus.connected ? 'WhatsApp oficial conectado' : isLocalHost ? 'Conexão WhatsApp configurada no painel online' : 'WhatsApp oficial não configurado'}</span><span>${whatsappStatus.connected ? 'As respostas recebidas são sincronizadas automaticamente.' : 'Configure a WhatsApp Business Platform em Configurações.'}</span><button class="detail-link" type="button" data-page="settings">Configurar →</button></div>`;
   const replyComposer = `<section class="reply-coach"><div class="reply-coach-heading"><div><h3>O cliente respondeu?</h3><p>As mensagens recebidas pela integração aparecem aqui; a IA prepara a resposta para você revisar.</p></div><span class="status-badge ${agentRuntime.connected ? 'green' : 'yellow'}">${agentRuntime.connected ? 'Codex local conectado' : 'Codex local desconectado'}</span></div>${conversationLog}<div class="message-actions">${analyzeLatest}</div><form id="customer-reply-form"><label class="field" for="customer-reply-input"><span>Resposta recebida</span><textarea class="field-textarea" id="customer-reply-input" name="customerReply" maxlength="5000" placeholder="Cole aqui o que o cliente escreveu…" required></textarea></label><button class="primary-btn" type="submit" ${customerReplyBusy || !agentRuntime.connected ? 'disabled' : ''}>${customerReplyBusy ? 'Analisando conversa…' : 'Analisar e sugerir resposta'}</button></form>${suggestedReply}<p class="modal-note">O envio é feito pela API oficial só depois que você clicar em “Enviar pelo WhatsApp oficial”. Mensagens livres exigem uma conversa iniciada pelo contato nas últimas 24 horas.</p></section>`;
   return `${pageHeader('Conversas sob controle', 'WhatsApp e CRM no mesmo lugar.', 'Receba respostas no painel, gere sugestões com a IA e envie pela integração oficial da Meta.', '<button class="primary-btn" data-action="new-lead">+ Preparar contato</button>')}${connectionNote}
-    <div class="messages-layout"><div class="message-list"><div class="message-list-head">${state.messages.length} conversas registradas</div>${state.messages.map((message) => { const itemLead = leadById(message.leadId); const status = messageListStatus(message, itemLead); return `<button class="message-item ${status.className} ${message.id === currentMessageId ? 'active' : ''}" data-message-id="${message.id}"><strong>${esc(itemLead?.name || 'Empresa')}</strong><span class="message-item-status ${status.className}" title="${esc(status.label)}">${status.label}</span></button>`; }).join('')}</div><div class="message-editor">${current && lead ? `<div class="panel-header"><div><p class="page-kicker">${messageStateLabel(current)}</p><h2>${esc(lead.name)}</h2><p>${esc(lead.category)} · ${esc(lead.city)}</p></div><span class="heat-badge">♨ ${lead.heat}/100</span></div><div class="message-meta"><span class="tag">Site: ${esc(lead.website)}</span><span class="tag">Maps: ${esc(lead.maps)}</span></div><label class="field"><span>Mensagem inicial — revise antes de abrir o WhatsApp</span><textarea class="field-textarea" id="message-text">${esc(current.text)}</textarea></label><div class="message-actions"><button class="primary-btn" data-action="save-message" data-message-id="${current.id}">Salvar rascunho</button><button class="ghost-btn" data-action="open-whatsapp" data-message-id="${current.id}">↗ Abrir WhatsApp</button><button class="ghost-btn" data-action="confirm-sent" data-message-id="${current.id}">${current.sentAt ? '✓ Enviado manualmente' : 'Confirmar envio manual'}</button></div><p class="modal-note" style="margin-top:18px">A Central não envia mensagens automaticamente. O envio continua sendo feito por você no WhatsApp.</p>${replyComposer}` : emptyState('Nenhuma mensagem preparada', 'Cadastre um lead e prepare o primeiro contato.')}</div></div>`;
+    <div class="messages-layout"><div class="message-list"><div class="message-list-head">${state.messages.length} conversas registradas</div>${state.messages.map((message) => { const itemLead = leadById(message.leadId); const status = messageListStatus(message, itemLead); return `<button class="message-item ${status.className} ${message.id === currentMessageId ? 'active' : ''}" data-message-id="${message.id}"><strong>${esc(itemLead?.name || 'Empresa')}</strong><span class="message-item-status ${status.className}" title="${esc(status.label)}">${status.label}</span></button>`; }).join('')}</div><div class="message-editor">${current && lead ? `<div class="panel-header"><div><p class="page-kicker">${messageStateLabel(current)}</p><h2>${esc(lead.name)}</h2><p>${esc(lead.category)} · ${esc(lead.city)}</p></div><span class="heat-badge">♨ ${lead.heat}/100</span></div><div class="message-meta"><span class="tag">Site: ${esc(lead.website)}</span><span class="tag">Maps: ${esc(lead.maps)}</span></div><label class="field"><span>Mensagem inicial — revise antes de abrir o WhatsApp</span><textarea class="field-textarea" id="message-text">${esc(current.text)}</textarea></label><div class="message-actions"><button class="primary-btn" data-action="save-message" data-message-id="${current.id}">Salvar rascunho</button><button class="ghost-btn" data-action="open-whatsapp" data-message-id="${current.id}">↗ Abrir WhatsApp</button><button class="ghost-btn" data-action="confirm-sent" data-message-id="${current.id}">${current.sentAt ? '✓ Enviado manualmente' : 'Confirmar envio manual'}</button></div><p class="modal-note" style="margin-top:18px">A Central não envia mensagens automaticamente. O envio continua sendo feito por você no WhatsApp.</p>${followUpScheduled}${followUpComposer}${replyComposer}` : emptyState('Nenhuma mensagem preparada', 'Cadastre um lead e prepare o primeiro contato.')}</div></div>`;
 }
 function messageListStatus(message, lead) {
   const last = message.conversation?.at(-1);
@@ -1080,6 +1130,9 @@ function bindPageEvents() {
   all('[data-action="save-message"]').forEach((button) => button.addEventListener('click', () => saveMessage(button.dataset.messageId)));
   all('[data-action="open-whatsapp"]').forEach((button) => button.addEventListener('click', () => openWhatsApp(button.dataset.messageId)));
   all('[data-action="confirm-sent"]').forEach((button) => button.addEventListener('click', () => confirmSent(button.dataset.messageId)));
+  all('[data-action="copy-follow-up"]').forEach((button) => button.addEventListener('click', () => copyFollowUp(button.dataset.messageId)));
+  all('[data-action="open-follow-up-whatsapp"]').forEach((button) => button.addEventListener('click', () => openFollowUpWhatsApp(button.dataset.messageId)));
+  all('[data-action="confirm-follow-up"]').forEach((button) => button.addEventListener('click', () => confirmFollowUpSent(button.dataset.messageId)));
   el('#customer-reply-form')?.addEventListener('submit', handleCustomerReplySubmit);
   all('[data-action="copy-customer-reply"]').forEach((button) => button.addEventListener('click', () => copyCustomerReply(button.dataset.messageId)));
   all('[data-action="mark-reply-sent"]').forEach((button) => button.addEventListener('click', () => markCustomerReplySent(button.dataset.messageId)));
@@ -1426,7 +1479,7 @@ function openLeadDetail(id) {
   el('[data-go-messages]')?.addEventListener('click', () => { currentLeadId = id; closeModal(); navigate('messages'); });
   el('[data-delete-lead]')?.addEventListener('click', () => openDeleteLeadConfirmation(id));
   all('[data-focus-field]').forEach((button) => button.addEventListener('click', () => { const field = el(`#edit-lead-form [name="${button.dataset.focusField}"]`); field?.scrollIntoView({ behavior: 'smooth', block: 'center' }); field?.focus(); }));
-  all('[data-flow-stage]').forEach((button) => button.addEventListener('click', () => { lead.stage = button.dataset.flowStage; if (['respondeu', 'interessado', 'ganho', 'perdido', 'nao-contatar'].includes(lead.stage)) lead.responseDue = null; if (lead.stage === 'contatado' && !lead.responseDue) lead.responseDue = daysFromNow(7); persist(); openLeadDetail(id); toast(`Etapa atualizada: ${stageLabel(lead.stage)}.`); }));
+  all('[data-flow-stage]').forEach((button) => button.addEventListener('click', () => { lead.stage = button.dataset.flowStage; if (['respondeu', 'interessado', 'ganho', 'perdido', 'nao-contatar'].includes(lead.stage)) { lead.responseDue = null; clearLeadFollowUp(lead.id); } if (lead.stage === 'contatado' && !lead.responseDue) lead.responseDue = daysFromNow(7); persist(); openLeadDetail(id); toast(`Etapa atualizada: ${stageLabel(lead.stage)}.`); }));
   el('[data-flow-open-message]')?.addEventListener('click', () => { lead.stage = lead.stage === 'qualificado' ? 'mensagem' : lead.stage; currentLeadId = id; persist(); closeModal(); navigate('messages'); });
   el('[data-create-project-from-lead]')?.addEventListener('click', () => createProjectFromLead(id));
   all('[data-flow-project-stage]').forEach((button) => button.addEventListener('click', () => { if (!project) return; project.stage = button.dataset.flowProjectStage; persist(); openLeadDetail(id); toast(`Projeto avançou para: ${stageLabel(project.stage, PROJECT_STAGES)}.`); }));
@@ -1548,7 +1601,7 @@ function openDeleteLeadsConfirmation(ids, fromAssistant = false) {
   if (fromAssistant) el('[data-assistant-delete-cancel]')?.addEventListener('click', () => { closeModal(); assistantMessages.push({ role: 'assistant', text: `Exclusão cancelada. ${names.map((name) => `“${name}”`).join(' e ')} continuam no painel.` }); saveAssistantMessages(); renderAssistant(); });
 }
 function deleteLead(id, refresh = true) { const lead = leadById(id); if (!lead) return; const name = lead.name.trim().toLocaleLowerCase('pt-BR'); state.leads = state.leads.filter((item) => item.id !== id); state.projects = state.projects.filter((item) => item.leadId !== id && String(item.name || '').trim().toLocaleLowerCase('pt-BR') !== name); state.messages = state.messages.filter((item) => item.leadId !== id); if (currentLeadId === id) currentLeadId = null; if (currentMessageId && !state.messages.some((item) => item.id === currentMessageId)) currentMessageId = null; persist(); if (refresh) { closeModal(); renderPages(); toast(`${lead.name} e os registros relacionados foram excluídos.`); } }
-function updateLeadStage(id, stage) { const lead = leadById(id); if (!lead) return; lead.stage = stage; if (['respondeu', 'interessado', 'ganho', 'perdido', 'nao-contatar'].includes(stage)) lead.responseDue = null; if (stage === 'contatado' && !lead.responseDue) lead.responseDue = daysFromNow(7); persist(); renderPages(); toast(`Etapa atualizada: ${stageLabel(stage)}.`); }
+function updateLeadStage(id, stage) { const lead = leadById(id); if (!lead) return; lead.stage = stage; if (['respondeu', 'interessado', 'ganho', 'perdido', 'nao-contatar'].includes(stage)) { lead.responseDue = null; clearLeadFollowUp(lead.id); } if (stage === 'contatado' && !lead.responseDue) lead.responseDue = daysFromNow(7); persist(); renderPages(); toast(`Etapa atualizada: ${stageLabel(stage)}.`); }
 
 function importResearchCandidates(runId) {
   const run = agentRuntime.currentRun?.id === runId ? agentRuntime.currentRun : agentRuntime.history?.find((item) => item.id === runId);
@@ -1653,6 +1706,45 @@ function openWhatsApp(id) {
   window.open(url, '_blank', 'noopener');
   toast('Conversa do cliente aberta no WhatsApp. Confira o contato e envie manualmente.');
 }
+async function copyFollowUp(id) {
+  const message = state.messages.find((item) => item.id === id);
+  const lead = message && leadById(message.leadId);
+  const text = el('#follow-up-text')?.value.trim();
+  if (!message || !lead || !text) return;
+  message.followUpDraft = text;
+  persist();
+  try { await navigator.clipboard.writeText(text); toast('Retomada copiada. Cole e envie pelo WhatsApp quando estiver pronto.'); }
+  catch { el('#follow-up-text')?.select(); toast('Não consegui copiar. O texto ficou selecionado para você copiar.'); }
+}
+function openFollowUpWhatsApp(id) {
+  const message = state.messages.find((item) => item.id === id);
+  const lead = message && leadById(message.leadId);
+  const text = el('#follow-up-text')?.value.trim();
+  if (!message || !lead || !text) return;
+  const phone = normalizeBrazilianWhatsApp(lead.phone);
+  if (!phone) { toast('Cadastre um WhatsApp com DDD para abrir a conversa direta.'); return; }
+  message.followUpDraft = text;
+  persist();
+  window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+  toast('Conversa aberta com a retomada preenchida. Confira e envie manualmente.');
+}
+function confirmFollowUpSent(id) {
+  const message = state.messages.find((item) => item.id === id);
+  const lead = message && leadById(message.leadId);
+  const text = el('#follow-up-text')?.value.trim();
+  if (!message || !lead || !text || !followUpReminderFor(lead.id)) return;
+  if (!confirm(`Confirma que enviou esta retomada para ${lead.name} pelo WhatsApp?`)) return;
+  const sentAt = isoDate(Date.now());
+  message.followUpDraft = text;
+  message.followUpSentAt = sentAt;
+  message.conversation ||= [];
+  message.conversation.push({ role: 'operador', status: 'enviada', text, createdAt: sentAt, sentAt, source: 'manual-follow-up' });
+  lead.responseDue = daysFromNow(7);
+  clearLeadFollowUp(lead.id, 'done');
+  persist();
+  renderPages();
+  toast('Retomada registrada. O prazo de retorno agora é de 7 dias corridos.');
+}
 async function handleCustomerReplySubmit(event) {
   event.preventDefault();
   if (customerReplyBusy) return;
@@ -1676,6 +1768,7 @@ async function handleCustomerReplySubmit(event) {
     if (!response.ok) throw new Error(payload.error || 'Não consegui analisar a resposta. Confira se o executor local continua ligado.');
     message.conversation ||= [];
     message.conversation.push({ role: 'cliente', text: customerText, createdAt: isoDate(Date.now()) });
+    clearLeadFollowUp(lead.id);
     message.conversation.push({ role: 'sugestao', status: 'rascunho', text: removeEmojis(payload.reply || ''), createdAt: isoDate(Date.now()) });
     const previousStage = lead.stage;
     const nextStage = ['interessado', 'respondeu', 'perdido', 'nao-contatar'].includes(payload.nextStage) ? payload.nextStage : 'respondeu';
@@ -1723,7 +1816,7 @@ function markCustomerReplySent(id) {
   renderPages();
   toast(lead && !['ganho', 'perdido', 'nao-contatar'].includes(lead.stage) ? 'Resposta enviada manualmente. Novo prazo de retorno: 7 dias corridos.' : 'Resposta registrada como enviada por você.');
 }
-function confirmSent(id) { const message = state.messages.find((item) => item.id === id); if (!message) return; const firstConfirmation = !message.sentAt; message.sentAt = message.sentAt || isoDate(Date.now()); const lead = leadById(message.leadId); if (lead) { if (['novo', 'verificar', 'qualificado', 'mensagem', 'aprovacao'].includes(lead.stage)) lead.stage = 'contatado'; if (firstConfirmation && !['ganho', 'perdido', 'nao-contatar'].includes(lead.stage)) lead.responseDue = daysFromNow(7); } persist(); renderPages(); toast(firstConfirmation ? 'Envio registrado. O prazo para aguardar resposta é de 7 dias corridos.' : 'O envio manual já estava registrado.'); }
+function confirmSent(id) { const message = state.messages.find((item) => item.id === id); if (!message) return; const firstConfirmation = !message.sentAt; message.sentAt = message.sentAt || isoDate(Date.now()); const lead = leadById(message.leadId); if (lead) { if (['novo', 'verificar', 'qualificado', 'mensagem', 'aprovacao'].includes(lead.stage)) lead.stage = 'contatado'; if (!['ganho', 'perdido', 'nao-contatar'].includes(lead.stage)) { if (firstConfirmation) lead.responseDue = daysFromNow(7); if (firstConfirmation) scheduleLeadFollowUp(message, lead, Date.parse(message.sentAt)); } } persist(); renderPages(); toast(firstConfirmation ? 'Envio registrado. Lembrete de retomada em 3 dias e prazo de encerramento em 7 dias.' : 'O envio manual já estava registrado.'); }
 function exportData() { const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `central-comercial-${new Date().toISOString().slice(0, 10)}.json`; anchor.click(); URL.revokeObjectURL(url); toast('Backup JSON exportado.'); }
 function resetData() { if (!confirm('Restaurar os dados de demonstração? Seus registros locais atuais serão substituídos.')) return; state = seedState(); currentLeadId = state.leads[0]?.id; currentMessageId = state.messages[0]?.id; persist(); renderPages(); toast('Dados de demonstração restaurados.'); }
 function toast(message) { const node = el('#toast'); if (!node) return; node.textContent = message; node.classList.add('show'); clearTimeout(window.__toastTimer); window.__toastTimer = setTimeout(() => node.classList.remove('show'), 3400); }
@@ -1739,6 +1832,7 @@ if (isLocalHost) {
     renderPages();
     toast(`${automaticallyClosed} lead${automaticallyClosed === 1 ? '' : 's'} movido${automaticallyClosed === 1 ? '' : 's'} para Encerrados após 7 dias sem resposta. O histórico foi mantido.`);
   }
+  if (initializeFollowUpReminders()) renderPages();
 }
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 setInterval(refreshLiveCountdowns, 1000);

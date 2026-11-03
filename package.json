@@ -1,7 +1,7 @@
 {
   "name": "central-comercial-ia",
   "private": true,
-  "version": "0.6.40",
+  "version": "0.6.41",
   "type": "module",
   "scripts": {
     "dev": "powershell -NoProfile -ExecutionPolicy Bypass -File ./start-local.ps1",

@@ -325,6 +325,11 @@ h3 { margin-bottom: 4px; font-size: 15px; }
 .message-meta { display: flex; flex-wrap: wrap; gap: 8px; margin: 15px 0 20px; }
 .message-actions { display: flex; flex-wrap: wrap; gap: 9px; }
 .reply-coach { display: grid; gap: 16px; margin-top: 28px; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--control); }
+.follow-up-coach { display: grid; gap: 14px; margin: 24px 0; padding: 20px; border: 1px solid color-mix(in srgb, var(--orange) 36%, var(--border)); border-radius: var(--radius-md); background: color-mix(in srgb, var(--orange) 5%, var(--control)); }
+.follow-up-coach h3 { margin: 0; font-size: 17px; }
+.follow-up-coach p:not(.page-kicker):not(.modal-note) { margin: 7px 0 0; color: var(--text-3); font-size: 13px; line-height: 1.55; }
+.follow-up-coach .page-kicker { margin: 0 0 7px; }
+.follow-up-coach .field-textarea { min-height: 92px; }
 .reply-coach-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .reply-coach-heading h3 { margin: 0; font-size: 17px; }
 .reply-coach-heading p { margin: 7px 0 0; color: var(--text-3); font-size: 13px; line-height: 1.5; }
