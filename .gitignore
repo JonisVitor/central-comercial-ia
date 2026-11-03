@@ -5,3 +5,5 @@ dist/
 .env.*
 !.env.example
 *.log
+.wwebjs_cache/
+.wwebjs_auth/

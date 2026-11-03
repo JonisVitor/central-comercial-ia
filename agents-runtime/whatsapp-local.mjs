@@ -45,7 +45,7 @@ async function connect() {
       await fs.mkdir(directory, { recursive: true });
       try { events = JSON.parse(await fs.readFile(inboxFile, 'utf8')).slice(-2000); } catch { events = []; }
       if (token !== generation) return;
-      const instance = new Client({ authStrategy: new LocalAuth({ dataPath: path.join(directory, 'session') }), puppeteer: { headless: true, executablePath }, qrMaxRetries: 8, authTimeoutMs: 120000 });
+      const instance = new Client({ authStrategy: new LocalAuth({ dataPath: path.join(directory, 'session') }), webVersionCache: { type: 'local', path: path.join(directory, 'web-cache') }, puppeteer: { headless: true, executablePath }, qrMaxRetries: 8, authTimeoutMs: 120000 });
       client = instance;
       instance.on('qr', async value => { const data = await qr.toDataURL(value, { width: 288, margin: 2 }); if (token === generation) { qrDataUrl = data; state = 'qr'; } });
       instance.on('authenticated', () => { if (token === generation) { state = 'authenticating'; qrDataUrl = ''; } });
