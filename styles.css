@@ -353,6 +353,30 @@ h3 { margin-bottom: 4px; font-size: 15px; }
 .settings-card { padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
 .settings-card p { color: var(--text-3); font-size: 12px; line-height: 1.5; }
 .settings-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 18px; }
+.whatsapp-settings { grid-column: 1 / -1; }
+.whatsapp-settings-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.whatsapp-settings-heading h2 { margin: 0; }
+.whatsapp-settings-heading p { max-width: 68ch; margin: 8px 0 0; }
+.whatsapp-config-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 22px; margin-top: 18px; }
+.whatsapp-config-row { display: grid; grid-template-columns: minmax(170px, auto) 1fr auto; align-items: center; gap: 10px; min-width: 0; padding: 10px 0; border-top: 1px solid var(--border); }
+.whatsapp-config-row code, .whatsapp-webhook code { color: var(--text-2); font-size: 11px; overflow-wrap: anywhere; }
+.whatsapp-config-row span, .whatsapp-webhook span { color: var(--text-3); font-size: 11px; }
+.whatsapp-config-row .status-badge { justify-self: end; }
+.whatsapp-webhook { display: grid; grid-template-columns: 150px minmax(0, 1fr); align-items: center; gap: 12px; margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.whatsapp-connection-strip { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text-3); font-size: 12px; }
+.whatsapp-connection-strip .detail-link { margin-left: auto; white-space: nowrap; }
+.whatsapp-settings .modal-note { margin-top: 14px; }
+@media (max-width: 780px) {
+  .whatsapp-config-list { grid-template-columns: 1fr; }
+  .whatsapp-config-row { grid-template-columns: minmax(145px, auto) 1fr auto; }
+  .whatsapp-connection-strip { align-items: flex-start; flex-wrap: wrap; }
+}
+@media (max-width: 560px) {
+  .whatsapp-settings-heading { display: grid; }
+  .whatsapp-config-row { grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
+  .whatsapp-config-row code { grid-column: 1 / -1; }
+  .whatsapp-webhook { grid-template-columns: 1fr; gap: 6px; }
+}
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center; padding: 20px; background: rgba(3, 7, 10, .72); backdrop-filter: blur(7px); }
 .modal-backdrop.open { display: flex; }

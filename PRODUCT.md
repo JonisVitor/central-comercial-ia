@@ -27,7 +27,9 @@ Prospects are found and checked manually, including Google Maps and digital pres
 - The floating assistant is available only when the local Codex runtime is running. It can answer from supplied context, start a read-only internal analysis, or perform a public web search with cited links when explicitly asked.
 - The web researcher is read-only and returns source-backed lead proposals. The operator may select and confirm import into the local CRM; imported records start at manual verification with neutral heat and no draft or contact sent. Codex CLI web search consumes the authenticated Codex plan allowance and does not require an API key.
 - The public Cloudflare app and mobile clients cannot connect to the local agent runtime until a protected remote execution bridge is designed and configured.
-- Sending messages to prospects remains a manual, user-approved action.
+- The WhatsApp Business Platform integration can receive messages/statuses through signed webhooks and associate messages with leads by phone.
+- WhatsApp replies are sent only after an explicit operator click and only inside the customer-service window. Cold outreach and automated AI sending remain disabled; template and opt-in workflows are required before business-initiated messages.
+- Cloudflare Pages does not execute the local Codex CLI. AI drafting still depends on the local executor, while the official WhatsApp webhook/send endpoints run online.
 
 ## Brand Commitments
 
