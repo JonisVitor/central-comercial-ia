@@ -11,7 +11,7 @@ let contacts = new Map(), events = [], writeQueue = Promise.resolve();
 let generation = 0, sending = false, lastSend = 0;
 let syncing=false, syncError='', syncedAt=null, chatSummaries=[];
 const aliases=new Map(),canonicalPhones=new Map(),historyRequests=new Set();
-let syncStats={checked:0,found:0,read:0,failed:0};
+let syncStats={checked:0,found:0,read:0,failed:0,requested:0};
 const phone = value => { const digits = String(value || '').replace(/\D/g, ''); return /^\d{10,11}$/.test(digits) ? `55${digits}` : digits; };
 const save = () => { writeQueue = writeQueue.catch(() => {}).then(async () => { await fs.mkdir(directory, { recursive: true }); await fs.writeFile(inboxFile, JSON.stringify(events.slice(-2000)), 'utf8'); }); return writeQueue; };
 const status = () => ({ connected: state === 'ready', state, qrDataUrl, error, account, channel: 'WhatsApp local · QR Code', local: true, syncing, syncError, syncedAt, chatCount:chatSummaries.length, messageCount:events.length, syncStats });
@@ -33,27 +33,50 @@ async function record(message, outbound = false, historical = false, matchedCont
   await save();
 }
 async function readStoredChat(addresses) {
-  return client.pupPage.evaluate(async candidates=>{
-    const collection=window.require('WAWebCollections').Chat;
-    const wanted=new Set(candidates.filter(Boolean));
-    const models=collection.getModelsArray();
-    const model=models.find(chat=>{
-      if(wanted.has(chat.id?._serialized))return true;
-      if(chat.id?.server==='lid'){try{return wanted.has(window.require('WAWebApiContact').getPhoneNumber(chat.id)?._serialized);}catch{}}
-      return false;
+  const wantedNumbers = addresses.filter(Boolean).map(address => String(address).split('@')[0].replace(/\D/g, ''));
+  return client.pupPage.evaluate(async candidates => {
+    const normalize = value => {
+      const digits = String(value || '').replace(/\D/g, '');
+      return /^\d{10,11}$/.test(digits) ? `55${digits}` : digits;
+    };
+    const wanted = new Set(candidates.map(normalize).filter(Boolean));
+    const collection = window.require('WAWebCollections').Chat;
+    const apiContact = window.require('WAWebApiContact');
+    const model = collection.getModelsArray().find(chat => {
+      if (chat.id?.server === 'g.us') return false;
+      const ids = [chat.id?._serialized, chat.id?.user];
+      if (chat.id?.server === 'lid') {
+        try { ids.push(apiContact.getPhoneNumber(chat.id)?._serialized); } catch {}
+      }
+      return ids.some(id => wanted.has(normalize(String(id || '').split('@')[0])));
     });
-    if(!model)return {found:false,messages:[]};
-    let list=model.msgs.getModelsArray().filter(m=>!m.isNotification);
-    try {if(list.length<40){const earlier=await window.require('WAWebChatLoadMessages').loadEarlierMsgs({chat:model});if(earlier?.length)list=[...earlier,...list];}}catch{}
-    const messages=list.filter(m=>!m.isNotification && m.id?._serialized).sort((a,b)=>a.t-b.t).slice(-40).map(m=>({id:{_serialized:m.id._serialized},fromMe:!!m.id.fromMe,body:m.body||m.caption||'',timestamp:m.t,hasMedia:!!(m.isMedia||m.isMms||m.mediaData),from:m.from?._serialized,to:m.to?._serialized}));
-    return {found:true,id:model.id?._serialized,name:model.name||model.formattedTitle||'',unreadCount:model.unreadCount||0,messages};
-  },addresses);
+    if (!model) return { found: false, messages: [] };
+    let list = model.msgs.getModelsArray().filter(message => !message.isNotification);
+    while (list.length < 40) {
+      try {
+        const earlier = await window.require('WAWebChatLoadMessages').loadEarlierMsgs({ chat: model });
+        if (!earlier?.length) break;
+        list = [...earlier.filter(message => !message.isNotification), ...list];
+      } catch { break; }
+    }
+    const messages = list.filter(message => !message.isNotification && message.id?._serialized)
+      .sort((a, b) => a.t - b.t).slice(-40).map(message => ({
+        id: { _serialized: message.id._serialized },
+        fromMe: !!message.id.fromMe,
+        body: message.body || message.caption || '',
+        timestamp: message.t,
+        hasMedia: !!(message.isMedia || message.isMms || message.mediaData),
+        from: message.from?._serialized,
+        to: message.to?._serialized,
+      }));
+    return { found: true, id: model.id?._serialized, name: model.name || model.formattedTitle || '', unreadCount: model.unreadCount || 0, messages };
+  }, wantedNumbers);
 }
 async function syncHistory() {
   if(syncing || state!=='ready' || !client)return;
   syncing=true;syncError='';
   try {
-    const summaries=[];let failed=0;syncStats={checked:0,found:0,read:0,failed:0};
+    const summaries=[];let failed=0;syncStats={checked:0,found:0,read:0,failed:0,requested:0};
     for(const [contactPhone,leadId] of [...contacts].slice(0,200)) {
       let step='validar número';syncStats.checked++;
       try {
@@ -62,17 +85,23 @@ async function syncHistory() {
         const mappings=await client.getContactLidAndPhone([address]).catch(()=>[]);
         for(const mapping of mappings)if(mapping.lid&&mapping.pn){aliases.set(mapping.lid,contactPhone);canonicalPhones.set(phone(mapping.pn.split('@')[0]),contactPhone);}
         step='ler conversa disponível';
-        const stored=await readStoredChat([mappings.find(item=>item.lid)?.lid,address,`${contactPhone}@c.us`]);
-        if(!stored.found)continue;
+        const stored=await readStoredChat([...mappings.map(item=>item.lid),address,`${contactPhone}@c.us`]);
+        if(!stored.found){
+          if(!historyRequests.has(address)){historyRequests.add(address);const requested=await client.syncHistory(address).catch(()=>false);if(requested){syncStats.requested++;setTimeout(()=>{void syncHistory();},10000).unref();}}
+          continue;
+        }
         const messages=stored.messages;syncStats.read+=messages.length;
-        if(!messages.length&&stored.id&&!historyRequests.has(stored.id)){historyRequests.add(stored.id);const requested=await client.syncHistory(stored.id).catch(()=>false);if(requested)setTimeout(()=>{void syncHistory();},10000).unref();}
+        if(!messages.length&&stored.id&&!historyRequests.has(stored.id)){historyRequests.add(stored.id);const requested=await client.syncHistory(stored.id).catch(()=>false);if(requested){syncStats.requested++;setTimeout(()=>{void syncHistory();},10000).unref();}}
         for(const message of messages)await record(message,!!message.fromMe,true,{contactPhone,leadId});
         const last=events.filter(e=>e.leadId===leadId).at(-1);
         if(last)summaries.push({leadId,contactPhone,name:stored.name||contactPhone,unreadCount:stored.unreadCount||0,lastMessage:last.body,lastAt:last.occurredAt});
-      } catch(failure) { failed++;syncStats.failed++; if(failed===1)console.error(`WhatsApp history (${step}):`,String(failure.message).replace(/\b\d{6,}\b/g,'[id]').slice(0,500)); }
+      } catch(failure) { failed++;syncStats.failed++; if(failed===1)console.error(`WhatsApp history (${step}):`,String(failure?.message||failure).replace(/\b\d{6,}\b/g,'[id]').slice(0,500)); }
     }
     chatSummaries=summaries;syncedAt=new Date().toISOString();
-    if(failed)syncError=`Não consegui ler o histórico de ${failed} contato(s). Os demais foram sincronizados; confira o telefone e tente novamente.`;
+    if(failed)syncError=`Não consegui ler o histórico de ${failed} contato(s). Os demais foram sincronizados; confira se o número cadastrado no lead é o mesmo do WhatsApp.`;
+    else if(syncStats.found>0&&syncStats.read===0&&syncStats.requested>0)syncError='Solicitei ao WhatsApp a sincronização do histórico das conversas encontradas. Deixe a sessão conectada; novas mensagens recebidas serão importadas automaticamente.';
+    else if(syncStats.found>0&&syncStats.read===0)syncError='O WhatsApp reconheceu os números, mas não disponibilizou histórico. Deixe a sessão conectada por alguns minutos e sincronize novamente. Mensagens novas serão capturadas enquanto esta sessão estiver conectada.';
+    else if(syncStats.found===0&&syncStats.checked>0)syncError='Nenhum telefone dos leads foi localizado no WhatsApp. Confira se os números têm DDD e código do Brasil (55).';
   } catch (failure) {syncError='A conexão está ativa, mas o histórico não foi carregado. Clique em Sincronizar para tentar novamente.';console.error('WhatsApp history:',String(failure.message).replace(/\b\d{6,}\b/g,'[id]').slice(0,500));}
   finally {syncing=false;}
 }
