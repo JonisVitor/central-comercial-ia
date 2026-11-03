@@ -82,6 +82,7 @@ function seedState() {
       { id: uid('message'), leadId: leadB.id, text: 'Olá! Vi o perfil da Fisio Movimento no Google e preparei uma sugestão de como uma página simples poderia deixar os serviços e o contato mais claros para novos pacientes. Posso te enviar para você dar uma olhada?', sentAt: null },
       { id: uid('message'), leadId: leadC.id, text: 'Perfeito. Vou separar uma referência visual e uma proposta objetiva para você avaliar com calma.', sentAt: daysFromNow(-1) }
     ],
+    calendarItems: [], dailyReviews: [], dailyPlans: [],
     settings: { demo: true, theme: 'dark' }
   };
 }
@@ -128,6 +129,9 @@ function loadState() {
       saved.projects = saved.projects.filter((project) => project.demo !== true && project.demo !== DEMO_MARKER);
       saved.messages = saved.messages.filter((message) => realLeadIds.has(message.leadId));
       saved.settings = { demo: false, theme: 'dark', ...(saved.settings || {}), demo: false };
+      saved.calendarItems = Array.isArray(saved.calendarItems) ? saved.calendarItems : [];
+      saved.dailyReviews = Array.isArray(saved.dailyReviews) ? saved.dailyReviews : [];
+      saved.dailyPlans = Array.isArray(saved.dailyPlans) ? saved.dailyPlans : [];
       ensureLeadPresenceFields(saved);
       ensureLeadDrafts(saved);
       closeExpiredUnansweredLeads(saved);
@@ -135,7 +139,7 @@ function loadState() {
       return saved;
     }
   } catch (error) { console.warn('Não foi possível ler o armazenamento local.', error); }
-  return { leads: [], projects: [], messages: [], settings: { demo: false, theme: 'dark' } };
+  return { leads: [], projects: [], messages: [], calendarItems: [], dailyReviews: [], dailyPlans: [], settings: { demo: false, theme: 'dark' } };
 }
 function loadAssistantMessages() {
   try {
@@ -145,6 +149,9 @@ function loadAssistantMessages() {
 }
 function saveAssistantMessages() { localStorage.setItem(ASSISTANT_CHAT_STORAGE, JSON.stringify(assistantMessages.slice(-30))); }
 function persist() {
+  state.calendarItems = Array.isArray(state.calendarItems) ? state.calendarItems : [];
+  state.dailyReviews = Array.isArray(state.dailyReviews) ? state.dailyReviews : [];
+  state.dailyPlans = Array.isArray(state.dailyPlans) ? state.dailyPlans : [];
   ensureLeadPresenceFields(state);
   ensureLeadDrafts(state);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -201,6 +208,9 @@ async function hydrateRemoteState() {
     if (hasRemoteState) {
       state = payload.state;
       state.settings = { demo: false, theme: 'dark', ...(state.settings || {}) };
+      state.calendarItems = Array.isArray(state.calendarItems) ? state.calendarItems : [];
+      state.dailyReviews = Array.isArray(state.dailyReviews) ? state.dailyReviews : [];
+      state.dailyPlans = Array.isArray(state.dailyPlans) ? state.dailyPlans : [];
       ensureLeadPresenceFields(state);
       ensureLeadDrafts(state);
       automaticallyClosed = closeExpiredUnansweredLeads(state);
@@ -311,11 +321,11 @@ function renderShell() {
 function renderAssistant() {
   const root = el('#assistant-root');
   if (!root) return;
-  const messages = assistantMessages.length ? assistantMessages.map((item) => `<div class="assistant-message ${item.role}"><span>${item.role === 'user' ? 'Você' : 'Assistente'}</span><p>${esc(item.text).replace(/\n/g, '<br>')}</p></div>`).join('') : `<div class="assistant-welcome"><h3>O que vamos fazer?</h3><p>Converse com o Codex, organize os leads ou peça uma pesquisa com fontes públicas.</p><button type="button" class="assistant-suggestion" data-assistant-suggestion="Analise meus leads e projetos com os agentes.">Analisar leads e projetos <span>↗</span></button><button type="button" class="assistant-suggestion" data-assistant-suggestion="Pesquise pet shops em São Carlos e traga fontes públicas para eu conferir.">Pesquisar na web com fontes <span>↗</span></button></div>`;
+  const messages = assistantMessages.length ? assistantMessages.map((item) => `<div class="assistant-message ${item.role}"><span>${item.role === 'user' ? 'Você' : 'Assistente'}</span><p>${esc(item.text).replace(/\n/g, '<br>')}</p></div>`).join('') : `<div class="assistant-welcome"><h3>O que vamos fazer?</h3><p>Peça análises, registre reuniões e prazos ou feche o dia para montar o plano de amanhã.</p><button type="button" class="assistant-suggestion" data-assistant-plan>Fechar o dia e planejar amanhã <span>↗</span></button><button type="button" class="assistant-suggestion" data-assistant-suggestion="Analise meus leads e projetos com os agentes.">Analisar leads e projetos <span>↗</span></button><button type="button" class="assistant-suggestion" data-assistant-suggestion="Pesquise pet shops em São Carlos e traga fontes públicas para eu conferir.">Pesquisar na web com fontes <span>↗</span></button></div>`;
   root.innerHTML = `<div class="assistant-widget ${assistantOpen ? 'is-open' : ''}">
     ${assistantOpen ? `<section class="assistant-panel" aria-label="Chat com os agentes">
       <header class="assistant-header"><span class="assistant-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0-7.2 13l-.8 4 4-1A8.5 8.5 0 1 0 12 3.5Z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg></span><div><h2>Assistente da Central</h2><p>${agentRuntime.connected ? 'Codex local conectado' : 'Executor local desconectado'}</p></div><button class="assistant-close" type="button" data-assistant-close aria-label="Fechar conversa"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
-      <div class="assistant-scope-notice"><strong>Codex local ${agentRuntime.connected ? 'conectado' : 'desconectado'}.</strong><span>Pesquisas e análises não alteram o CRM. Para excluir, escreva “excluir [nome do lead]” e confirme na janela. O chat não envia mensagens.</span>${agentRuntime.connected ? '' : '<span>Para conectar a IA, inicie <code>npm run agents-runtime</code>. A exclusão confirmada funciona sem o executor.</span>'}</div>
+      <div class="assistant-scope-notice"><strong>Codex local ${agentRuntime.connected ? 'conectado' : 'desconectado'}.</strong><span>O chat organiza tarefas, reuniões e prazos no calendário. Para fechar o dia, conte o que concluiu e peça o plano de amanhã. Mensagens a clientes continuam manuais.</span>${agentRuntime.connected ? '' : '<span>Para conectar a IA, inicie <code>START-LOCAL.cmd</code> pelo Windows. A exclusão confirmada funciona sem o executor.</span>'}</div>
       <div class="assistant-messages" role="log" aria-live="polite" aria-relevant="additions text">${messages}${assistantBusy ? '<div class="assistant-typing" role="status"><i></i><i></i><i></i><span>Preparando resposta…</span></div>' : ''}</div>
       <form class="assistant-composer" data-assistant-form><label class="sr-only" for="assistant-input">Escreva uma instrução para os agentes</label><textarea id="assistant-input" name="message" rows="1" maxlength="2000" placeholder="Escreva uma mensagem ou /clear para limpar…" title="Enter envia · Shift+Enter quebra a linha" ${assistantBusy ? 'disabled' : ''} required></textarea><button type="submit" aria-label="Enviar mensagem" ${assistantBusy ? 'disabled' : ''}><svg viewBox="0 0 24 24"><path d="M4 12 20 4l-5 16-3-7-8-1Z"/><path d="m12 13 8-9"/></svg></button></form>
       <p class="assistant-foot">Pesquisas usam seu plano Codex. Exclusões pedem confirmação; o painel não envia mensagens.</p>
@@ -325,6 +335,13 @@ function renderAssistant() {
   root.querySelector('[data-assistant-toggle]')?.addEventListener('click', () => { assistantOpen = !assistantOpen; renderAssistant(); if (assistantOpen) el('#assistant-input')?.focus(); });
   root.querySelector('[data-assistant-close]')?.addEventListener('click', () => { assistantOpen = false; renderAssistant(); });
   root.querySelectorAll('[data-assistant-suggestion]').forEach((button) => button.addEventListener('click', (event) => sendAssistantMessage(event.currentTarget.dataset.assistantSuggestion)));
+  root.querySelectorAll('[data-assistant-plan]').forEach((button) => button.addEventListener('click', () => {
+    const input = root.querySelector('#assistant-input');
+    if (!input) return;
+    input.value = 'Fechamento do dia: hoje eu fiz [liste o que você concluiu]. Monte um resumo fiel do meu dia e planeje amanhã com as tarefas importantes do painel. Inclua reuniões e prazos que já estejam marcados.';
+    input.focus();
+    input.setSelectionRange(input.value.indexOf('['), input.value.indexOf(']') + 1);
+  }));
   root.querySelector('[data-assistant-form]')?.addEventListener('submit', (event) => { event.preventDefault(); sendAssistantMessage(el('#assistant-input')?.value || ''); });
   root.querySelector('#assistant-input')?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
@@ -421,7 +438,7 @@ async function sendAssistantMessage(rawText) {
   try {
     const response = await fetch('/api/agent-runtime/chat', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, history: assistantMessages.slice(-12), leads, projects, messages, activeConversation: draftTarget?.context || null })
+      body: JSON.stringify({ message: text, history: assistantMessages.slice(-20), leads, projects, messages, calendarItems: state.calendarItems || [], dailyPlans: state.dailyPlans || [], currentDate: localDateKey(today()), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, activeConversation: draftTarget?.context || null })
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || 'Não foi possível responder agora.');
@@ -431,7 +448,8 @@ async function sendAssistantMessage(rawText) {
       const destination = draftTarget.kind === 'customer-reply' ? 'rascunho de resposta' : 'mensagem inicial';
       assistantMessages.push({ role: 'assistant', text: `Atualizei o ${destination} de ${draftTarget.leadName} na conversa. Revise o texto no painel antes de copiar ou enviar.` });
     } else {
-      assistantMessages.push({ role: 'assistant', text: payload.reply });
+      const orchestrationResult = applyOrchestrationResult(payload);
+      assistantMessages.push({ role: 'assistant', text: payload.reply + (orchestrationResult ? `\n\n${orchestrationResult}` : '') });
     }
     if (payload.run?.currentRun) {
       agentRuntime = payload.run;
@@ -445,6 +463,66 @@ async function sendAssistantMessage(rawText) {
   assistantBusy = false;
   saveAssistantMessages();
   renderAssistant();
+}
+
+function applyOrchestrationResult(payload = {}) {
+  let changed = false;
+  const addItems = [...(Array.isArray(payload.agendaItems) ? payload.agendaItems : []), ...(Array.isArray(payload.tomorrowPlan?.items) ? payload.tomorrowPlan.items : [])];
+  let added = 0;
+  let deadlineUpdates = 0;
+  for (const item of addItems) {
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(item?.date || '')) ? String(item.date) : '';
+    const title = String(item?.title || '').trim().slice(0, 140);
+    if (!date || !title) continue;
+    const lead = state.leads.find((entry) => item.leadName && importKey(entry.name) === importKey(item.leadName));
+    const project = state.projects.find((entry) => item.projectName && importKey(entry.name) === importKey(item.projectName));
+    const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(String(item.time || '')) ? String(item.time) : '';
+    const kind = ['reuniao', 'entrega', 'contato', 'tarefa'].includes(item.type) ? item.type : 'tarefa';
+    if (project && kind === 'entrega') {
+      if (localDateKey(project.dueDate) !== date) { project.dueDate = dateFromLocalKey(date, 12).toISOString(); deadlineUpdates += 1; }
+      if (item.details) project.aiSummary = String(item.details).trim().slice(0, 700);
+      changed = true;
+      continue;
+    }
+    const key = `${importKey(title)}|${date}|${time}|${lead?.id || ''}|${project?.id || ''}`;
+    const existing = (state.calendarItems || []).find((entry) => `${importKey(entry.title)}|${entry.date}|${entry.time || ''}|${entry.leadId || ''}|${entry.projectId || ''}` === key);
+    if (existing) {
+      existing.details = String(item.details || existing.details || '').trim().slice(0, 1200);
+      existing.updatedAt = isoDate(Date.now());
+    } else {
+      state.calendarItems ||= [];
+      state.calendarItems.push({ id: uid('agenda'), title, date, time, type: kind, details: String(item.details || '').trim().slice(0, 1200), leadId: lead?.id || '', leadName: lead?.name || String(item.leadName || '').trim().slice(0, 140), projectId: project?.id || '', projectName: project?.name || String(item.projectName || '').trim().slice(0, 140), status: 'pending', source: 'assistant', createdAt: isoDate(Date.now()) });
+      added += 1;
+    }
+    if (project && kind === 'entrega' && project.dueDate !== date) project.dueDate = dateFromLocalKey(date, 12).toISOString();
+    changed = true;
+  }
+  if (payload.dailyReview && payload.dailyReview.date === localDateKey(today())) {
+    const review = { date: payload.dailyReview.date, summary: String(payload.dailyReview.summary || '').trim().slice(0, 700), completed: Array.isArray(payload.dailyReview.completed) ? payload.dailyReview.completed.map((item) => String(item).trim().slice(0, 160)).filter(Boolean).slice(0, 12) : [], updatedAt: isoDate(Date.now()) };
+    state.dailyReviews ||= [];
+    const index = state.dailyReviews.findIndex((entry) => entry.date === review.date);
+    if (index >= 0) state.dailyReviews[index] = review; else state.dailyReviews.push(review);
+    changed = true;
+  }
+  if (payload.tomorrowPlan && /^\d{4}-\d{2}-\d{2}$/.test(String(payload.tomorrowPlan.date || ''))) {
+    const plan = { date: String(payload.tomorrowPlan.date), summary: String(payload.tomorrowPlan.summary || '').trim().slice(0, 700), updatedAt: isoDate(Date.now()) };
+    state.dailyPlans ||= [];
+    const index = state.dailyPlans.findIndex((entry) => entry.date === plan.date);
+    if (index >= 0) state.dailyPlans[index] = plan; else state.dailyPlans.push(plan);
+    changed = true;
+  }
+  for (const summary of Array.isArray(payload.projectSummaries) ? payload.projectSummaries : []) {
+    const project = state.projects.find((entry) => summary.projectName && importKey(entry.name) === importKey(summary.projectName));
+    if (project && summary.summary) { project.aiSummary = String(summary.summary).trim().slice(0, 700); changed = true; }
+  }
+  if (changed) {
+    persist();
+    renderPages();
+    if (added || deadlineUpdates) return [added ? `${added} item${added === 1 ? '' : 's'} entraram no calendário` : '', deadlineUpdates ? `${deadlineUpdates} prazo${deadlineUpdates === 1 ? '' : 's'} de projeto atualizado${deadlineUpdates === 1 ? '' : 's'}` : ''].filter(Boolean).join(' e ') + '.';
+    if (payload.tomorrowPlan) return 'Resumo de hoje e plano de amanhã salvos no calendário.';
+    return 'Atualizei os detalhes de agenda no painel.';
+  }
+  return '';
 }
 
 function findAssistantDraftTarget(rawText) {
@@ -568,51 +646,134 @@ function renderCalendar() {
   const gridStart = new Date(year, month, 1 - mondayOffset);
   const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
   const visibleProjects = state.projects.filter((project) => project.dueDate && localDateKey(project.dueDate) && (calendarShowCompleted || !['entregue', 'ativo'].includes(project.stage)));
+  const visibleItems = (state.calendarItems || []).filter((item) => item.date && item.status !== 'cancelled' && (calendarShowCompleted || item.status !== 'done'));
   const byDate = new Map();
   for (const project of visibleProjects) {
     const key = localDateKey(project.dueDate);
     if (!byDate.has(key)) byDate.set(key, []);
-    byDate.get(key).push(project);
+    byDate.get(key).push({ kind: 'project', project });
+  }
+  for (const item of visibleItems) {
+    if (!byDate.has(item.date)) byDate.set(item.date, []);
+    byDate.get(item.date).push({ kind: 'agenda', item });
   }
   const weekdays = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
   const todayKey = localDateKey(today());
   const days = Array.from({ length: 42 }, (_, index) => {
     const date = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + index);
     const key = localDateKey(date);
-    const events = byDate.get(key) || [];
-    const visibleEvents = events.slice(0, 2).map((project) => {
-      const finished = ['entregue', 'ativo'].includes(project.stage);
-      const count = countdown(project.dueDate);
-      const tone = finished ? 'completed' : count.overdue ? 'overdue' : count.urgent ? 'urgent' : '';
-      return `<button type="button" class="calendar-event ${tone}" data-project-id="${esc(project.id)}" title="${esc(project.name)} · ${esc(stageLabel(project.stage, PROJECT_STAGES))}"><strong>${esc(project.name)}</strong><span ${finished ? '' : `data-countdown-date="${esc(project.dueDate)}" data-countdown-tone="deadline"`}>${finished ? 'Concluído' : count.text}</span></button>`;
-    }).join('');
+    const events = (byDate.get(key) || []).sort((a, b) => String(a.item?.time || '').localeCompare(String(b.item?.time || '')));
+    const visibleEvents = events.slice(0, 2).map(renderCalendarCellEvent).join('');
     const otherMonth = date.getMonth() !== month;
     return `<div class="calendar-day ${otherMonth ? 'outside-month' : ''} ${key === todayKey ? 'is-today' : ''} ${key === selectedCalendarDate ? 'is-selected' : ''}" aria-label="${new Intl.DateTimeFormat('pt-BR', { dateStyle: 'full' }).format(date)}"><button type="button" class="calendar-day-number" data-calendar-date="${key}" aria-pressed="${key === selectedCalendarDate}">${date.getDate()}</button><div class="calendar-day-events">${visibleEvents}${events.length > 2 ? `<span class="calendar-more">+${events.length - 2} mais</span>` : ''}</div></div>`;
   }).join('');
   const selectedEvents = byDate.get(selectedCalendarDate) || [];
+  const selectedProjects = selectedEvents.filter((event) => event.kind === 'project').map((event) => event.project);
+  const selectedItems = selectedEvents.filter((event) => event.kind === 'agenda').map((event) => event.item);
   const monthProjects = visibleProjects.filter((project) => localDateKey(project.dueDate).startsWith(monthKey));
+  const monthItems = visibleItems.filter((item) => item.date.startsWith(monthKey));
   const monthOverdue = monthProjects.filter((project) => countdown(project.dueDate).overdue && !['entregue', 'ativo'].includes(project.stage)).length;
   const withoutDate = state.projects.filter((project) => !project.dueDate && !['entregue', 'ativo'].includes(project.stage));
   const upcoming = visibleProjects.filter((project) => !['entregue', 'ativo'].includes(project.stage)).sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0, 5);
   const monthLabel = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(calendarCursor).replace(/^./, (letter) => letter.toLocaleUpperCase('pt-BR'));
   const selectedDate = dateFromLocalKey(selectedCalendarDate);
   const selectedLabel = selectedDate ? new Intl.DateTimeFormat('pt-BR', { day: 'numeric', month: 'long' }).format(selectedDate) : '';
+  const dailyReview = (state.dailyReviews || []).find((review) => review.date === selectedCalendarDate);
+  const dailyPlan = (state.dailyPlans || []).find((plan) => plan.date === selectedCalendarDate);
+  const daySummary = dailyPlan?.summary || dailyReview?.summary || (selectedEvents.length ? `Você tem ${selectedEvents.length} compromisso${selectedEvents.length === 1 ? '' : 's'} ou prazo${selectedEvents.length === 1 ? '' : 's'} anotado${selectedEvents.length === 1 ? '' : 's'} para este dia.` : 'Sem atividades registradas para esta data. Use o chat para contar o que fez e planejar o próximo dia.');
   return `<div class="calendar-page">
-    <div class="calendar-page-heading"><div><h1>Calendário de projetos</h1><p class="lede">Datas de entrega em dias corridos. Alterações nos projetos aparecem aqui automaticamente.</p></div><button class="primary-btn" type="button" data-action="new-project">+ Novo projeto</button></div>
-    <div class="calendar-summary" aria-label="Resumo dos prazos"><span><strong>${monthProjects.length}</strong> entregas neste mês</span><span class="${monthOverdue ? 'calendar-summary-overdue' : ''}"><strong>${monthOverdue}</strong> atrasadas</span><span><strong>${withoutDate.length}</strong> sem data definida</span></div>
+    <div class="calendar-page-heading"><div><h1>Agenda de trabalho</h1><p class="lede">Reuniões, tarefas e entregas em um só lugar. O chat pode registrar compromissos e montar seu plano diário.</p></div><div class="calendar-heading-actions"><button class="ghost-btn" type="button" data-action="new-calendar-item">+ Anotar tarefa</button><button class="primary-btn" type="button" data-action="new-project">+ Novo projeto</button></div></div>
+    <div class="calendar-summary" aria-label="Resumo da agenda"><span><strong>${monthItems.length}</strong> tarefas e reuniões neste mês</span><span><strong>${monthProjects.length}</strong> entregas de projeto</span><span class="${monthOverdue ? 'calendar-summary-overdue' : ''}"><strong>${monthOverdue}</strong> atrasadas</span><span><strong>${withoutDate.length}</strong> projetos sem data</span></div>
     <div class="calendar-layout">
       <section class="calendar-panel" aria-label="Calendário mensal">
         <header class="calendar-toolbar"><div class="calendar-month-controls"><button type="button" class="calendar-nav-btn" data-calendar-month="-1" aria-label="Mês anterior">‹</button><h2>${monthLabel}</h2><button type="button" class="calendar-nav-btn" data-calendar-month="1" aria-label="Próximo mês">›</button><button type="button" class="ghost-btn calendar-today-btn" data-calendar-month="today">Hoje</button></div><label class="calendar-completed-toggle"><input type="checkbox" data-calendar-completed ${calendarShowCompleted ? 'checked' : ''}/> Mostrar concluídos</label></header>
         <div class="calendar-board"><div class="calendar-weekdays">${weekdays.map((day) => `<span>${day}</span>`).join('')}</div><div class="calendar-grid">${days}</div></div>
-        <p class="calendar-footnote">Cada marcador mostra a etapa atual e o tempo restante. Clique em uma data para filtrar as entregas do dia; clique em um projeto para editar o prazo.</p>
+        <p class="calendar-footnote">Clique em uma data para ver o resumo do dia. Se citar reunião ou tarefa com data no chat, a IA registra aqui; os prazos oficiais dos projetos continuam ligados à ficha de cada projeto.</p>
       </section>
       <aside class="calendar-side">
-        <section class="calendar-side-section"><div class="calendar-side-heading"><h2>Entregas em ${selectedLabel}</h2><span>${selectedEvents.length}</span></div>${selectedEvents.length ? `<div class="calendar-agenda-list">${selectedEvents.map(renderCalendarProjectRow).join('')}</div>` : `<p class="calendar-empty">Nenhuma entrega prevista para esta data.</p>`}</section>
+        <section class="calendar-side-section calendar-day-brief"><div class="calendar-side-heading"><h2>Resumo de ${selectedLabel}</h2><span>${dailyPlan ? 'Plano da IA' : dailyReview ? 'Fechamento salvo' : 'Agenda'}</span></div><p class="calendar-brief-summary">${esc(daySummary)}</p>${dailyReview?.completed?.length ? `<div class="calendar-completed-list"><strong>Concluído hoje</strong>${dailyReview.completed.map((entry) => `<span>✓ ${esc(entry)}</span>`).join('')}</div>` : ''}${dailyPlan?.date === localDateKey(addLocalDays(today(), 1)) || selectedCalendarDate === localDateKey(addLocalDays(today(), 1)) ? '<button type="button" class="ghost-btn calendar-plan-chat" data-assistant-plan>Fechar o dia e planejar amanhã no chat</button>' : ''}</section>
+        <section class="calendar-side-section"><div class="calendar-side-heading"><h2>Atividades em ${selectedLabel}</h2><span>${selectedEvents.length}</span></div>${selectedItems.length || selectedProjects.length ? `<div class="calendar-agenda-list">${selectedItems.map(renderCalendarAgendaRow).join('')}${selectedProjects.map(renderCalendarProjectRow).join('')}</div>` : `<p class="calendar-empty">Nenhuma tarefa, reunião ou entrega prevista para esta data.</p>`}</section>
         <section class="calendar-side-section"><div class="calendar-side-heading"><h2>Próximos prazos</h2><button type="button" class="text-btn" data-page="projects">Ver projetos →</button></div>${upcoming.length ? `<div class="calendar-agenda-list">${upcoming.map(renderCalendarProjectRow).join('')}</div>` : `<p class="calendar-empty">Nenhum projeto aberto com data definida.</p>`}</section>
         <section class="calendar-side-section"><div class="calendar-side-heading"><h2>Sem data definida</h2><span>${withoutDate.length}</span></div>${withoutDate.length ? `<div class="calendar-agenda-list">${withoutDate.map((project) => `<button type="button" class="calendar-untimed" data-project-id="${esc(project.id)}"><strong>${esc(project.name)}</strong><span>Definir data de entrega →</span></button>`).join('')}</div>` : `<p class="calendar-empty">Todos os projetos abertos têm uma data cadastrada.</p>`}</section>
       </aside>
     </div>
   </div>`;
+}
+
+function renderCalendarCellEvent(event) {
+  if (event.kind === 'project') {
+    const project = event.project;
+    const finished = ['entregue', 'ativo'].includes(project.stage);
+    const count = countdown(project.dueDate);
+    const tone = finished ? 'completed' : count.overdue ? 'overdue' : count.urgent ? 'urgent' : '';
+    return `<button type="button" class="calendar-event ${tone}" data-project-id="${esc(project.id)}" title="Entrega · ${esc(project.name)} · ${esc(stageLabel(project.stage, PROJECT_STAGES))}"><strong>${esc(project.name)}</strong><span>${finished ? 'Entregue' : 'Entrega · ' + esc(count.text)}</span></button>`;
+  }
+  const item = event.item;
+  const typeLabel = { reuniao: 'Reunião', entrega: 'Entrega', contato: 'Contato', tarefa: 'Tarefa' }[item.type] || 'Tarefa';
+  return `<button type="button" class="calendar-event agenda-${esc(item.type || 'tarefa')} ${item.status === 'done' ? 'completed' : ''}" data-agenda-id="${esc(item.id)}" title="${esc(typeLabel)} · ${esc(item.title)}"><strong>${item.time ? `${esc(item.time)} · ` : ''}${esc(item.title)}</strong><span>${esc(typeLabel)}${item.status === 'done' ? ' · Concluída' : ''}</span></button>`;
+}
+
+function renderCalendarAgendaRow(item) {
+  const typeLabel = { reuniao: 'Reunião', entrega: 'Entrega', contato: 'Contato', tarefa: 'Tarefa' }[item.type] || 'Tarefa';
+  return `<button type="button" class="calendar-agenda-item calendar-task-row ${item.status === 'done' ? 'completed' : ''}" data-agenda-id="${esc(item.id)}"><span class="calendar-agenda-date">${item.time ? esc(item.time) : typeLabel}</span><span class="calendar-agenda-copy"><strong>${esc(item.title)}</strong><small>${esc(item.projectName || item.leadName || item.details || typeLabel)}</small></span><span class="calendar-agenda-count">${item.status === 'done' ? 'Concluída' : 'Abrir'}</span></button>`;
+}
+
+function openCalendarItemModal() {
+  const leadOptions = state.leads.filter((lead) => !CLOSED_LEAD_STAGES.includes(lead.stage)).map((lead) => `<option value="${esc(lead.id)}">${esc(lead.name)}</option>`).join('');
+  const projectOptions = state.projects.filter((project) => !['entregue', 'ativo'].includes(project.stage)).map((project) => `<option value="${esc(project.id)}">${esc(project.name)}</option>`).join('');
+  modal(`<div class="modal-header"><div><h2>Anotar na agenda</h2><p>Registre uma tarefa, reunião ou prazo para aparecer no calendário.</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><form id="calendar-item-form"><div class="form-grid"><label class="field full"><span>O que precisa acontecer? *</span><input class="field-input" name="title" required maxlength="140" placeholder="Ex.: Reunião com a GranPet" /></label><label class="field"><span>Data *</span><input class="field-input" type="date" name="date" value="${esc(selectedCalendarDate)}" required /></label><label class="field"><span>Horário</span><input class="field-input" type="time" name="time" /></label><label class="field"><span>Tipo</span><select class="field-input" name="type"><option value="tarefa">Tarefa</option><option value="reuniao">Reunião</option><option value="contato">Contato</option><option value="entrega">Entrega</option></select></label><label class="field"><span>Projeto relacionado</span><select class="field-input" name="projectId"><option value="">Nenhum</option>${projectOptions}</select></label><label class="field"><span>Lead relacionado</span><select class="field-input" name="leadId"><option value="">Nenhum</option>${leadOptions}</select></label><label class="field full"><span>Detalhes para lembrar</span><textarea class="field-textarea" name="details" maxlength="1200" placeholder="Link da reunião, pauta, material para levar…"></textarea></label></div><div class="modal-actions"><button type="button" class="ghost-btn" data-modal-close>Cancelar</button><button class="primary-btn" type="submit">Salvar na agenda</button></div></form>`);
+  el('#calendar-item-form')?.addEventListener('submit', saveCalendarItem);
+}
+
+function saveCalendarItem(event) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const project = projectById(String(form.get('projectId') || ''));
+  const lead = leadById(String(form.get('leadId') || ''));
+  const date = String(form.get('date') || '');
+  const type = String(form.get('type') || 'tarefa');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+  if (project && type === 'entrega') {
+    project.dueDate = dateFromLocalKey(date, 12).toISOString();
+    const details = String(form.get('details') || '').trim();
+    if (details) project.aiSummary = details.slice(0, 700);
+  } else {
+    state.calendarItems ||= [];
+    state.calendarItems.push({ id: uid('agenda'), title: String(form.get('title') || '').trim().slice(0, 140), date, time: String(form.get('time') || ''), type, details: String(form.get('details') || '').trim().slice(0, 1200), projectId: project?.id || '', projectName: project?.name || '', leadId: lead?.id || '', leadName: lead?.name || '', status: 'pending', source: 'manual', createdAt: isoDate(Date.now()) });
+  }
+  persist();
+  closeModal();
+  selectedCalendarDate = date;
+  calendarCursor = new Date(dateFromLocalKey(date));
+  renderPages();
+  toast(project && type === 'entrega' ? `Prazo de entrega atualizado para ${project.name}.` : 'Item adicionado ao calendário.');
+}
+
+function openCalendarItemDetail(id) {
+  const item = (state.calendarItems || []).find((entry) => entry.id === id);
+  if (!item) return;
+  const project = projectById(item.projectId);
+  const lead = leadById(item.leadId);
+  const day = dateFromLocalKey(item.date);
+  const dateLabel = day ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'full' }).format(day) : item.date;
+  const typeLabel = { reuniao: 'Reunião', entrega: 'Entrega', contato: 'Contato', tarefa: 'Tarefa' }[item.type] || 'Tarefa';
+  const statusLabel = item.status === 'done' ? 'Concluída' : 'Pendente';
+  modal(`<div class="modal-header"><div><p class="page-kicker">${esc(typeLabel)} · ${esc(statusLabel)}</p><h2>${esc(item.title)}</h2><p>${esc(dateLabel)}${item.time ? ` · ${esc(item.time)}` : ''}</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div>${item.details ? `<p class="modal-note">${esc(item.details)}</p>` : ''}${project ? `<div class="agenda-linked-project"><strong>Projeto · ${esc(project.name)}</strong><p>${esc(project.aiSummary || project.notes || `${project.service} · ${stageLabel(project.stage, PROJECT_STAGES)}`)}</p><button type="button" class="text-btn" data-open-linked-project>Ver projeto →</button></div>` : ''}${lead ? `<p class="field-help">Lead relacionado: ${esc(lead.name)}</p>` : ''}<div class="modal-actions">${item.status !== 'done' ? '<button class="primary-btn" type="button" data-agenda-complete>Marcar como concluída</button>' : '<button class="ghost-btn" type="button" data-agenda-reopen>Reabrir tarefa</button>'}<button class="ghost-btn" type="button" data-agenda-cancel>Remover da agenda</button></div>`);
+  el('[data-agenda-complete]')?.addEventListener('click', () => updateCalendarItem(id, 'done'));
+  el('[data-agenda-reopen]')?.addEventListener('click', () => updateCalendarItem(id, 'pending'));
+  el('[data-agenda-cancel]')?.addEventListener('click', () => { if (confirm('Remover este item da agenda?')) updateCalendarItem(id, 'cancelled'); });
+  el('[data-open-linked-project]')?.addEventListener('click', () => openProjectDetail(project.id));
+}
+
+function updateCalendarItem(id, status) {
+  const item = (state.calendarItems || []).find((entry) => entry.id === id);
+  if (!item) return;
+  item.status = status;
+  item.updatedAt = isoDate(Date.now());
+  persist();
+  closeModal();
+  renderPages();
+  toast(status === 'done' ? 'Tarefa marcada como concluída.' : status === 'pending' ? 'Tarefa reaberta.' : 'Item removido da agenda.');
 }
 
 function renderCalendarProjectRow(project) {
@@ -739,10 +900,22 @@ function bindPageEvents() {
   all('[data-page]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.page)));
   all('[data-action="new-lead"]').forEach((button) => button.addEventListener('click', openLeadModal));
   all('[data-action="new-project"]').forEach((button) => button.addEventListener('click', openProjectModal));
+  all('[data-action="new-calendar-item"]').forEach((button) => button.addEventListener('click', openCalendarItemModal));
   all('[data-action="import-crm-json"]').forEach((button) => button.addEventListener('click', openCRMJsonImportModal));
   all('[data-action="maps-task"]').forEach((button) => button.addEventListener('click', () => { assistantOpen = true; renderAssistant(); const input = el('#assistant-input'); if (input) { input.value = 'Pesquise empresas no Google Maps: [nicho] em [cidade, estado]. Traga candidatos com links e evidências para eu revisar.'; input.focus(); input.setSelectionRange(input.value.indexOf('['), input.value.lastIndexOf(']') + 1); } }));
   all('[data-lead-id]').forEach((button) => button.addEventListener('click', (event) => { if (event.target.closest('select')) return; openLeadDetail(button.dataset.leadId); }));
-   all('[data-project-id]').forEach((button) => button.addEventListener('click', (event) => { event.stopPropagation(); openProjectDetail(button.dataset.projectId); }));
+    all('[data-project-id]').forEach((button) => button.addEventListener('click', (event) => { event.stopPropagation(); openProjectDetail(button.dataset.projectId); }));
+  all('[data-agenda-id]').forEach((button) => button.addEventListener('click', (event) => { event.stopPropagation(); openCalendarItemDetail(button.dataset.agendaId); }));
+  all('[data-assistant-plan]').forEach((button) => button.addEventListener('click', () => {
+    assistantOpen = true;
+    renderAssistant();
+    const input = el('#assistant-input');
+    if (input) {
+      input.value = 'Fechamento do dia: hoje eu fiz [liste o que você concluiu]. Monte um resumo fiel do meu dia e planeje amanhã com as tarefas importantes do painel. Inclua reuniões e prazos que já estejam marcados.';
+      input.focus();
+      input.setSelectionRange(input.value.indexOf('['), input.value.indexOf(']') + 1);
+    }
+  }));
   all('[data-calendar-month]').forEach((button) => button.addEventListener('click', () => {
     if (button.dataset.calendarMonth === 'today') {
       calendarCursor = new Date(today().getFullYear(), today().getMonth(), 1);
@@ -1285,7 +1458,7 @@ function openProjectDetail(id) {
     const active = stageIndex === current;
     return `<button type="button" class="stage-choice ${done ? 'done' : active ? 'current' : ''}" data-project-stage="${stage}"><span class="stage-marker">${done ? '✓' : active ? '●' : number}</span><span>${number}. ${label}</span></button>`;
   }).join('');
-  modal(`<div class="modal-header"><div><p class="page-kicker">Acompanhamento do projeto</p><h2>${esc(project.name)}</h2><p>${esc(project.service)}</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><div class="detail-grid"><div class="detail-item"><small>Prazo</small><strong class="${countdown(project.dueDate).overdue ? 'muted' : ''}" data-countdown-date="${esc(project.dueDate || '')}" data-countdown-tone="plain">${countdown(project.dueDate).text}</strong></div><div class="detail-item"><small>Limite</small><strong>${formatLongDate(project.dueDate)}</strong></div></div><form id="project-date-form" data-project-id="${esc(project.id)}" class="project-date-form"><label class="field"><span>Data de entrega</span><input class="field-input" type="date" name="dueDate" value="${localDateKey(project.dueDate)}" /></label><button class="ghost-btn" type="submit">Salvar prazo</button></form><div class="field"><label>Etapas da jornada</label><p class="field-help">A prospecção é registrada na ficha do lead. Este projeto começa após a venda; escolha a etapa atual da entrega.</p><div class="stage-choice-list">${completedSales}${saleStage}${deliveryStages}</div><p class="muted" id="project-stage-label">Atual: etapa ${COMMERCIAL_PROGRESS_STAGES.length + current + 1} de ${FULL_PROJECT_PROGRESS_STAGES.length} · ${stageLabel(project.stage, PROJECT_STAGES)}</p></div><p class="modal-note">${esc(project.notes || 'Sem observações registradas.')}</p><div class="modal-actions"><button class="ghost-btn" data-modal-close>Fechar</button></div>`);
+  modal(`<div class="modal-header"><div><p class="page-kicker">Acompanhamento do projeto</p><h2>${esc(project.name)}</h2><p>${esc(project.service)}</p></div><button class="icon-btn" data-modal-close aria-label="Fechar">×</button></div><div class="detail-grid"><div class="detail-item"><small>Prazo</small><strong class="${countdown(project.dueDate).overdue ? 'muted' : ''}" data-countdown-date="${esc(project.dueDate || '')}" data-countdown-tone="plain">${countdown(project.dueDate).text}</strong></div><div class="detail-item"><small>Limite</small><strong>${formatLongDate(project.dueDate)}</strong></div></div>${project.aiSummary ? `<section class="project-ai-summary"><strong>Resumo do projeto</strong><p>${esc(project.aiSummary)}</p></section>` : ''}<form id="project-date-form" data-project-id="${esc(project.id)}" class="project-date-form"><label class="field"><span>Data de entrega</span><input class="field-input" type="date" name="dueDate" value="${localDateKey(project.dueDate)}" /></label><button class="ghost-btn" type="submit">Salvar prazo</button></form><div class="field"><label>Etapas da jornada</label><p class="field-help">A prospecção é registrada na ficha do lead. Este projeto começa após a venda; escolha a etapa atual da entrega.</p><div class="stage-choice-list">${completedSales}${saleStage}${deliveryStages}</div><p class="muted" id="project-stage-label">Atual: etapa ${COMMERCIAL_PROGRESS_STAGES.length + current + 1} de ${FULL_PROJECT_PROGRESS_STAGES.length} · ${stageLabel(project.stage, PROJECT_STAGES)}</p></div><p class="modal-note">${esc(project.notes || 'Sem observações registradas.')}</p><div class="modal-actions"><button class="ghost-btn" data-modal-close>Fechar</button></div>`);
   el('#project-date-form')?.addEventListener('submit', saveProjectDueDate);
   all('[data-project-stage]').forEach((button) => button.addEventListener('click', () => {
     project.stage = button.dataset.projectStage;
@@ -1346,7 +1519,8 @@ async function handleCustomerReplySubmit(event) {
     const response = await fetch('/api/agent-runtime/customer-reply', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        lead: { name: lead.name, category: lead.category, city: lead.city, website: lead.website, websiteUrl: lead.websiteUrl, salesScript: lead.salesScript, evidence: lead.evidence, stage: lead.stage },
+        lead: { id: lead.id, name: lead.name, category: lead.category, city: lead.city, website: lead.website, websiteUrl: lead.websiteUrl, salesScript: lead.salesScript, evidence: lead.evidence, stage: lead.stage },
+        projects: state.projects.filter((project) => project.leadId === lead.id), currentDate: localDateKey(today()),
         initialMessage: message.text, initialWasSent: Boolean(message.sentAt), conversation: message.conversation || [], customerReply: customerText
       })
     });
@@ -1365,7 +1539,8 @@ async function handleCustomerReplySubmit(event) {
     }
     lead.responseDue = null;
     persist();
-    toast(lead.stage !== previousStage ? `Resposta registrada. Etapa atualizada para ${stageLabel(lead.stage)}.` : 'Resposta registrada. O prazo de espera foi encerrado. Revise a sugestão da IA.');
+    const agendaNotice = applyOrchestrationResult(payload);
+    toast([lead.stage !== previousStage ? `Resposta registrada. Etapa atualizada para ${stageLabel(lead.stage)}.` : 'Resposta registrada. O prazo de espera foi encerrado. Revise a sugestão da IA.', agendaNotice].filter(Boolean).join(' '));
   } catch (error) {
     toast(error.message || 'Não consegui analisar a resposta.');
   } finally {
