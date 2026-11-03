@@ -5,7 +5,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
 
-const allowedRoutes = new Set(['/api/local-state','/api/agent-runtime/health','/api/agent-runtime/chat','/api/agent-runtime/run','/api/agent-runtime/customer-reply','/api/agent-runtime/operations','/api/whatsapp/status','/api/whatsapp/inbox','/api/whatsapp/chats','/api/whatsapp/contacts','/api/whatsapp/sync','/api/whatsapp/connect','/api/whatsapp/disconnect','/api/whatsapp/send']);
+const allowedRoutes = new Set(['/api/local-state','/api/agent-runtime/health','/api/agent-runtime/chat','/api/agent-runtime/run','/api/agent-runtime/customer-reply','/api/agent-runtime/operations','/api/agent-runtime/verify-leads','/api/whatsapp/status','/api/whatsapp/inbox','/api/whatsapp/chats','/api/whatsapp/contacts','/api/whatsapp/sync','/api/whatsapp/connect','/api/whatsapp/disconnect','/api/whatsapp/send']);
 export function createGatewayHandler({root,originHost,publicOrigin=()=>'',backendPort=4174}) {
   const dist=path.resolve(root,'dist');
   return async (req,res)=>{

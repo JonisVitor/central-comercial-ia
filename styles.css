@@ -437,6 +437,19 @@ h3 { margin-bottom: 4px; font-size: 15px; }
 .modal-lead-detail > .modal-header { position: sticky; top: -26px; z-index: 5; margin: -4px 0 18px; padding: 6px 0 14px; background: var(--surface-2); }
 .modal-lead-detail .lead-workflow { position: sticky; top: 76px; max-height: calc(94dvh - 170px); overflow-y: auto; padding: 17px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); }
 .workflow-heading h3 { margin: 0 0 5px; font-size: 16px; }
+.presence-verification { margin: 16px 0 20px; padding: 14px 0; border-block: 1px solid var(--border); color: var(--text); }
+.presence-verification strong { display: block; font-size: 14px; line-height: 1.5; }
+.presence-verification.is-pending strong { color: var(--orange); }
+.presence-verification p, .presence-sources p { margin: 8px 0; color: var(--text-2); font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+.presence-verification small { display: block; margin: 8px 0; color: var(--text-2); font-size: 12px; }
+.presence-verification button { margin-top: 8px; min-height: 44px; white-space: normal; }
+.presence-sources { margin-top: 8px; color: var(--text-2); font-size: 12px; line-height: 1.6; }
+.presence-sources summary { cursor: pointer; color: var(--orange); padding: 6px 0; }
+.presence-sources a { display: block; padding: 5px 0; color: var(--text-2); overflow-wrap: anywhere; text-underline-offset: 3px; }
+.presence-card-status { margin: 12px 0 0; color: var(--text-2); font-size: 13px; line-height: 1.5; }
+.presence-card-status[data-state="working"], .presence-card-status[data-state="queued"] { color: var(--orange); }
+.lead-workflow .flow-check-copy strong { font-size: 13px; line-height: 1.5; }
+.lead-workflow .flow-check-copy small { font-size: 12px; line-height: 1.6; }
 .workflow-heading p { margin: 0 0 17px; color: var(--text-3); font-size: 11px; line-height: 1.5; }
 .flow-section h4 { margin: 0 0 8px; color: var(--text-2); font-size: 12px; }
 .flow-check { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 10px 0; border-top: 1px solid var(--border); }

@@ -1,6 +1,8 @@
 import './styles.css';
 import { createOperations } from './operations.js';
 import { createWhatsAppWorkspace } from './whatsapp-workspace.js';
+import { rebasePresenceEdits, markManualPresence } from './lead-presence.js';
+import { verificationLabel, verificationNotice, verificationCheck, verificationSources } from './lead-verification-view.js';
 
 const STORAGE_KEY = 'central-comercial-ia:v1';
 const ASSISTANT_CHAT_STORAGE = 'central-comercial-ia:assistant-chat:v1';
@@ -127,6 +129,7 @@ const isDesktopLoopback = ['localhost', '127.0.0.1'].includes(window.location.ho
 const isLocalHost = isDesktopLoopback || window.__CENTRAL_LOCAL_GATEWAY__ === true;
 let localHydrated=false, localRevision=0, localDirty=false, localSaveBusy=false, localSaveBlocked=false, localSaveError='';
 let localSaveTimer;
+let localBaseState=null;
 let remoteAccessStatus={phase:'stopped',email:'',url:''};
 let remoteConnectionState = isLocalHost ? 'local' : 'checking';
 
@@ -318,12 +321,13 @@ async function hydrateLocalState(poll=false) {
     }
     if(poll && data.revision===localRevision) return;
     if(!poll && state.leads.length) localStorage.setItem('central-before-shared-crm',JSON.stringify(state));
-    state=data.state;localRevision=data.revision;localHydrated=true;localDirty=false;localSaveError='';
+    const previousState=state;
+    state=data.state;localBaseState=structuredClone(data.state);localRevision=data.revision;localHydrated=true;localDirty=false;localSaveError='';
     state.calendarItems ||= [];state.dailyPlans ||= [];state.dailyReviews ||= [];state.settings ||= {theme:'dark'};
     ensureLeadPresenceFields(state);ensureLeadDrafts(state);operations.resetTracking();
     localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
     if(!leadById(currentLeadId))currentLeadId=state.leads[0]?.id;
-    applyTheme();renderShell();renderPages();
+    applyTheme();if(!poll)renderShell();renderPages();refreshOpenLeadVerification(previousState);
   } catch { localSaveError='Os dados continuam neste navegador. Inicie o executor local para compartilhar e salvar o CRM no PC.';if(!poll)renderPages(); }
 }
 async function syncLocalState() {
@@ -333,9 +337,13 @@ async function syncLocalState() {
   try {
     const response=await fetch('/api/local-state',{method:'PUT',headers:{'Content-Type':'application/json','X-Central-Action':'crm'},body:JSON.stringify({revision:localRevision,state:snapshot})});
     const data=await response.json();
-    if(response.status===409){localStorage.setItem('central-crm-conflict-backup',JSON.stringify(state));localSaveBlocked=true;localSaveError='Suas alterações foram preservadas em um backup neste navegador. Carregue os dados atuais antes de continuar.';renderPages();return;}
+    if(response.status===409){
+      const rebased=rebasePresenceEdits(localBaseState,state,data.state);
+      if(rebased){state=rebased;localBaseState=structuredClone(data.state);localRevision=data.revision;localDirty=true;localStorage.setItem(STORAGE_KEY,JSON.stringify(state));return;}
+      localStorage.setItem('central-crm-conflict-backup',JSON.stringify(state));localSaveBlocked=true;localSaveError='Suas alterações foram preservadas em um backup neste navegador. Carregue os dados atuais antes de continuar.';renderPages();return;
+    }
     if(!response.ok)throw new Error(data.error);
-    localRevision=data.revision;localSaveError='';
+    localRevision=data.revision;localBaseState=snapshot;localSaveError='';
   } catch { localDirty=true;localSaveError='Não consegui salvar no PC. Suas alterações continuam neste navegador; vou tentar novamente.'; }
   finally {localSaveBusy=false;if(localDirty&&!localSaveBlocked){clearTimeout(localSaveTimer);localSaveTimer=setTimeout(syncLocalState,3000);}}
 }
@@ -904,12 +912,14 @@ function renderLeads() {
 }
 function renderLeadCard(lead) {
   const message = messageByLead(lead.id); const count = lead.responseDue ? countdown(lead.responseDue) : null;
-  const websiteTag = lead.website === 'Não encontrado' ? ['red', 'Site não encontrado'] : lead.website === 'Não verificado' ? ['yellow', 'Site a verificar'] : ['green', 'Site identificado'];
+  const websiteTag = verificationCheck(lead,'website')?.status==='inconclusive' ? ['yellow','Site não confirmado'] : lead.website === 'Não encontrado' ? ['red', 'Site não encontrado'] : lead.website === 'Não verificado' ? ['yellow', 'Site a verificar'] : ['green', 'Site identificado'];
   const instagramStatus = lead.instagramStatus || (lead.instagramUrl ? 'Encontrado' : 'Não verificado');
-  const instagramTone = instagramStatus === 'Encontrado' ? 'green' : instagramStatus === 'Não encontrado' ? 'red' : 'yellow';
-  const mapsLabel = lead.maps === 'Não verificado' ? 'a verificar' : lead.maps === 'Não encontrado' ? 'não encontrado' : lead.maps === 'Encontrado' ? 'encontrado' : lead.maps.replace('Cadastro ', '');
-  const mapsTone = lead.maps === 'Não encontrado' ? 'red' : lead.maps === 'Não verificado' ? 'blue' : lead.maps === 'Cadastro incompleto' ? 'yellow' : 'green';
-  return `<article class="lead-card"><div class="card-top"><div><div class="card-name">${esc(lead.name)}</div><div class="card-location">${esc(lead.category)} · ${esc(lead.city)}</div></div><span class="heat-badge">♨ ${lead.heat}/100</span></div><div class="card-tags"><span class="tag ${websiteTag[0]}">${websiteTag[1]}</span><span class="tag ${mapsTone}">Maps: ${esc(mapsLabel)}</span><span class="tag ${instagramTone}">Instagram: ${instagramStatus === 'Encontrado' ? 'perfil encontrado' : instagramStatus === 'Não encontrado' ? 'não encontrado' : 'a verificar'}</span><span class="tag ${instagramActivityTone(lead.instagramActivity)}">Instagram ${esc(instagramActivityLabel(lead.instagramActivity))}</span><span class="status-badge ${statusTone(lead.stage)}">${stageLabel(lead.stage)}</span></div><p class="card-evidence">${esc(lead.evidence)}</p><div class="card-footer"><select class="status-select" data-lead-stage="${lead.id}" aria-label="Etapa de ${esc(lead.name)}">${LEAD_STAGES.map(([id, label]) => `<option value="${id}" ${id === lead.stage ? 'selected' : ''}>${label}</option>`).join('')}</select>${count ? `<span class="lead-response-deadline"><small>Prazo para resposta</small><strong data-countdown-date="${esc(lead.responseDue || '')}" data-countdown-tone="plain">${count.text}</strong></span>` : '<span class="lead-response-deadline empty">Sem prazo de resposta</span>'}<a class="maps-link" href="${esc(mapsSearchUrl(lead))}" target="_blank" rel="noopener noreferrer" aria-label="Pesquisar ${esc(lead.name)} no Google Maps">Ver no Maps ↗</a><button class="detail-link" data-lead-id="${lead.id}">Abrir →</button></div>${message ? `<div class="row-meta" style="margin-top:12px">${message.sentAt ? 'Contato confirmado manualmente' : 'Mensagem pronta para revisão'}</div>` : ''}</article>`;
+  const instagramUnconfirmed=verificationCheck(lead,'instagramStatus')?.status==='inconclusive';
+  const instagramTone = instagramUnconfirmed ? 'yellow' : instagramStatus === 'Encontrado' ? 'green' : instagramStatus === 'Não encontrado' ? 'red' : 'yellow';
+  const mapsUnconfirmed=verificationCheck(lead,'maps')?.status==='inconclusive';
+  const mapsLabel = mapsUnconfirmed ? 'não confirmado' : lead.maps === 'Não verificado' ? 'a verificar' : lead.maps === 'Não encontrado' ? 'não encontrado' : lead.maps === 'Encontrado' ? 'encontrado' : String(lead.maps||'Não verificado').replace('Cadastro ', '');
+  const mapsTone = mapsUnconfirmed ? 'yellow' : lead.maps === 'Não encontrado' ? 'red' : lead.maps === 'Não verificado' ? 'blue' : lead.maps === 'Cadastro incompleto' ? 'yellow' : 'green';
+  return `<article class="lead-card"><div class="card-top"><div><div class="card-name">${esc(lead.name)}</div><div class="card-location">${esc(lead.category)} · ${esc(lead.city)}</div></div><span class="heat-badge">♨ ${lead.heat}/100</span></div><div class="card-tags"><span class="tag ${websiteTag[0]}">${websiteTag[1]}</span><span class="tag ${mapsTone}">Maps: ${esc(mapsLabel)}</span><span class="tag ${instagramTone}">Instagram: ${instagramUnconfirmed ? 'não confirmado' : instagramStatus === 'Encontrado' ? 'perfil encontrado' : instagramStatus === 'Não encontrado' ? 'não encontrado' : 'a verificar'}</span><span class="tag ${instagramActivityTone(lead.instagramActivity)}">Instagram ${esc(instagramActivityLabel(lead.instagramActivity))}</span><span class="status-badge ${statusTone(lead.stage)}">${stageLabel(lead.stage)}</span></div><p class="presence-card-status" data-state="${esc(lead.verification?.state||'')}">${esc(isLocalHost ? verificationLabel(lead) : 'Verificação disponível no painel local')}</p><p class="card-evidence">${esc(lead.evidence)}</p><div class="card-footer"><select class="status-select" data-lead-stage="${lead.id}" aria-label="Etapa de ${esc(lead.name)}">${LEAD_STAGES.map(([id, label]) => `<option value="${id}" ${id === lead.stage ? 'selected' : ''}>${label}</option>`).join('')}</select>${count ? `<span class="lead-response-deadline"><small>Prazo para resposta</small><strong data-countdown-date="${esc(lead.responseDue || '')}" data-countdown-tone="plain">${count.text}</strong></span>` : '<span class="lead-response-deadline empty">Sem prazo de resposta</span>'}<a class="maps-link" href="${esc(mapsSearchUrl(lead))}" target="_blank" rel="noopener noreferrer" aria-label="Pesquisar ${esc(lead.name)} no Google Maps">Ver no Maps ↗</a><button class="detail-link" data-lead-id="${lead.id}">Abrir →</button></div>${message ? `<div class="row-meta" style="margin-top:12px">${message.sentAt ? 'Contato confirmado manualmente' : 'Mensagem pronta para revisão'}</div>` : ''}</article>`;
 }
 
 function renderProjects() {
@@ -1632,6 +1642,12 @@ function openLeadDetail(id) {
   el('#edit-lead-form [name="instagramUrl"]').addEventListener('change', (event) => { if (event.target.value.trim()) el('#edit-lead-form [name="instagramStatus"]').value = 'Encontrado'; });
   el('[data-go-messages]')?.addEventListener('click', () => { currentLeadId = id; closeModal(); navigate('messages'); });
   el('[data-delete-lead]')?.addEventListener('click', () => openDeleteLeadConfirmation(id));
+  bindLeadWorkflow(id,project);
+}
+
+function bindLeadWorkflow(id,project) {
+  const lead=leadById(id);
+  el('[data-reverify-lead]')?.addEventListener('click',()=>void retryLeadVerification(id));
   all('[data-focus-field]').forEach((button) => button.addEventListener('click', () => { const field = el(`#edit-lead-form [name="${button.dataset.focusField}"]`); field?.scrollIntoView({ behavior: 'smooth', block: 'center' }); field?.focus(); }));
   all('[data-flow-stage]').forEach((button) => button.addEventListener('click', () => { lead.stage = button.dataset.flowStage; if (['respondeu', 'interessado', 'ganho', 'perdido', 'nao-contatar'].includes(lead.stage)) { lead.responseDue = null; clearLeadFollowUp(lead.id); } if (lead.stage === 'contatado' && !lead.responseDue) lead.responseDue = daysFromNow(7); persist(); openLeadDetail(id); toast(`Etapa atualizada: ${stageLabel(lead.stage)}.`); }));
   el('[data-flow-open-message]')?.addEventListener('click', () => { lead.stage = lead.stage === 'qualificado' ? 'mensagem' : lead.stage; currentLeadId = id; persist(); closeModal(); navigate('messages'); });
@@ -1641,20 +1657,25 @@ function openLeadDetail(id) {
 
 function renderLeadWorkflow(lead, message, project, instagramStatus, instagramActivity) {
   const checks = [
-    { key: 'website', label: 'Conferir se tem site', done: lead.website !== 'Não verificado', result: lead.website === 'Encontrado' ? 'Site cadastrado' : lead.website === 'Não encontrado' ? 'Nenhum site cadastrado' : '', button: 'Registrar resultado' },
-    { key: 'maps', label: 'Revisar perfil no Google Maps', done: lead.maps !== 'Não verificado', result: lead.maps === 'Não verificado' ? '' : lead.maps, button: 'Registrar resultado' },
+    { key: 'website', label: 'Site próprio', done: ['Encontrado','Não encontrado'].includes(lead.website), result: lead.website === 'Encontrado' ? 'Site encontrado' : lead.website === 'Não encontrado' ? 'Site não localizado na busca' : '', button: 'Registrar resultado' },
+    { key: 'maps', label: 'Perfil no Google Maps', done: Boolean(lead.maps) && lead.maps !== 'Não verificado', result: lead.maps === 'Não verificado' ? '' : lead.maps, button: 'Registrar resultado' },
     { key: 'instagramStatus', label: 'Conferir perfil do Instagram', done: instagramStatus !== 'Não verificado', result: instagramStatus === 'Encontrado' ? 'Perfil encontrado' : instagramStatus === 'Não encontrado' ? 'Não localizado' : '', button: 'Registrar resultado' },
     { key: 'instagramActivity', label: 'Conferir atividade do Instagram', done: instagramActivity !== 'Não verificado', result: instagramActivityLabel(instagramActivity), button: 'Registrar atividade' }
   ];
+  for(const item of checks) {
+    item.check=verificationCheck(lead,item.key);
+    if(item.check?.status==='inconclusive' || (item.key==='instagramActivity' && instagramActivity==='Não foi possível confirmar'))item.done=false;
+  }
   const incomplete = checks.find((item) => !item.done);
-  const checkRows = checks.map((item) => `<div class="flow-check ${item.done ? 'complete' : incomplete?.key === item.key ? 'current' : ''}"><span class="flow-marker">${item.done ? '✓' : incomplete?.key === item.key ? '●' : '·'}</span><div class="flow-check-copy"><strong>${item.label}</strong><small>${item.done ? esc(item.result) : 'Ainda falta conferir'}</small></div>${item.key === 'maps' ? `<a class="flow-mini-link" href="${esc(mapsSearchUrl(lead))}" target="_blank" rel="noopener noreferrer">Abrir Maps</a>` : item.key === 'instagramStatus' ? `<a class="flow-mini-link" href="${esc(safeUrl(lead.instagramUrl) || instagramSearchUrl(lead))}" target="_blank" rel="noopener noreferrer">${lead.instagramUrl ? 'Abrir perfil' : 'Pesquisar'}</a>` : ''}${!item.done ? `<button type="button" class="flow-edit-link" data-focus-field="${item.key}">${item.button}</button>` : ''}</div>`).join('');
+  const checking=['queued','working'].includes(lead.verification?.state);
+  const checkRows = checks.map((item) => `<div class="flow-check ${item.done ? 'complete' : incomplete?.key === item.key ? 'current' : ''}"><span class="flow-marker">${item.done ? '✓' : '·'}</span><div class="flow-check-copy"><strong>${item.label}</strong><small>${item.done ? esc(item.result) : item.check?.status==='inconclusive' ? 'Consultado · não foi possível confirmar' : checking ? 'A IA está conferindo este ponto' : 'Aguardando verificação'}</small>${verificationSources(item.check,esc)}</div>${item.key === 'maps' ? `<a class="flow-mini-link" href="${esc(mapsSearchUrl(lead))}" target="_blank" rel="noopener noreferrer">Abrir Maps</a>` : item.key === 'instagramStatus' ? `<a class="flow-mini-link" href="${esc(safeUrl(lead.instagramUrl) || instagramSearchUrl(lead))}" target="_blank" rel="noopener noreferrer">${lead.instagramUrl ? 'Abrir perfil' : 'Pesquisar'}</a>` : ''}${!item.done && !checking ? `<button type="button" class="flow-edit-link" data-focus-field="${item.key}">${item.button}</button>` : ''}</div>`).join('');
   let nextTitle = '';
   let nextText = '';
   let nextAction = '';
   if (incomplete) {
-    nextTitle = incomplete.label;
-    nextText = 'Confira este ponto e registre o resultado na ficha para avançar.';
-    nextAction = `<button type="button" class="flow-primary" data-focus-field="${incomplete.key}">Atualizar ${incomplete.key === 'website' ? 'site' : incomplete.key === 'maps' ? 'Maps' : incomplete.key === 'instagramActivity' ? 'atividade do Instagram' : 'Instagram'}</button>`;
+    nextTitle = checking ? 'Verificação automática em andamento' : 'Revisar o ponto não confirmado';
+    nextText = checking ? 'Os resultados aparecem aqui automaticamente. Você pode continuar organizando suas conversas.' : 'Veja a evidência da pesquisa. Se conseguir confirmar esse dado por outro caminho, registre o resultado na ficha.';
+    nextAction = checking ? '' : `<button type="button" class="flow-primary" data-focus-field="${incomplete.key}">Conferir ${incomplete.key === 'website' ? 'site' : incomplete.key === 'maps' ? 'Maps' : incomplete.key === 'instagramActivity' ? 'atividade do Instagram' : 'Instagram'}</button>`;
   } else if (['novo', 'verificar'].includes(lead.stage)) {
     nextTitle = 'Qualificar a empresa'; nextText = 'Revise as informações e confirme se vale iniciar o contato.'; nextAction = '<button type="button" class="flow-primary" data-flow-stage="qualificado">Marcar como qualificada</button>';
   } else if (lead.stage === 'qualificado') {
@@ -1684,12 +1705,35 @@ function renderLeadWorkflow(lead, message, project, instagramStatus, instagramAc
     nextText = lead.stage === 'perdido' ? 'Se a empresa voltar a demonstrar interesse, você pode reabrir a oportunidade.' : 'Este lead foi marcado para não receber novos contatos.';
     nextAction = lead.stage === 'perdido' ? '<button type="button" class="flow-secondary" data-flow-stage="qualificado">Reabrir oportunidade</button>' : '';
   }
-  if (!project && !CLOSED_LEAD_STAGES.includes(lead.stage)) nextText = (lead.aiNextStepStage === lead.stage ? lead.aiNextStep : '') || operations.instruction(lead) || nextText;
+  if (!incomplete && !project && !CLOSED_LEAD_STAGES.includes(lead.stage)) nextText = (lead.aiNextStepStage === lead.stage ? lead.aiNextStep : '') || operations.instruction(lead) || nextText;
   const salesStages = [...COMMERCIAL_PROGRESS_STAGES, ['venda-confirmada', 'Venda confirmada']];
   const currentSalesStep = project || lead.stage === 'ganho' ? salesStages.length : ({ novo: 0, verificar: 0, qualificado: 1, mensagem: 2, aprovacao: 2, contatado: 4, respondeu: 4, interessado: 5, proposta: 6, negociacao: 6 }[lead.stage] ?? 0);
   const salesProgress = ['perdido', 'nao-contatar'].includes(lead.stage) && !project ? '' : `<div class="flow-project-progress"><strong>Prospecção e venda · etapa ${Math.min(currentSalesStep + 1, salesStages.length)} de ${salesStages.length}${currentSalesStep === salesStages.length ? ' · concluída' : ''}</strong>${salesStages.map(([stage, label], index) => { const done = index < currentSalesStep; const current = index === currentSalesStep; return `<div class="flow-project-step ${done ? 'complete' : current ? 'current' : ''}"><span class="flow-marker">${done ? '✓' : current ? '●' : index + 1}</span><span>${label}</span></div>`; }).join('')}</div>`;
   const projectProgress = project ? `<div class="flow-project-progress"><strong>Landing page e hospedagem · etapa ${COMMERCIAL_PROGRESS_STAGES.length + PROJECT_STAGES.findIndex(([id]) => id === project.stage) + 1} de ${FULL_PROJECT_PROGRESS_STAGES.length}</strong>${PROJECT_STAGES.slice(1).map(([stage, label], index) => { const stageIndex = index + 1; const current = PROJECT_STAGES.findIndex(([id]) => id === project.stage); const fullIndex = COMMERCIAL_PROGRESS_STAGES.length + stageIndex; const done = stageIndex < current; const active = stageIndex === current; return `<div class="flow-project-step ${done ? 'complete' : active ? 'current' : ''}"><span class="flow-marker">${done ? '✓' : active ? '●' : fullIndex + 1}</span><span>${label}</span></div>`; }).join('')}</div>` : '';
-  return `<div class="workflow-heading"><h3>Próximos passos</h3><p>O painel destaca a próxima tarefa conforme o que já foi conferido e a etapa da venda.</p></div><div class="flow-section"><h4>Presença digital</h4>${checkRows}</div><div class="flow-next"><span class="flow-eyebrow">Próxima ação</span><strong>${esc(nextTitle)}</strong><p>${esc(nextText)}</p>${nextAction}</div>${salesProgress}${projectProgress}`;
+  return `<div class="workflow-heading"><h3>Próximos passos</h3><p>Pesquisa automática dos canais e acompanhamento da venda.</p></div>${verificationNotice(lead,esc,isLocalHost)}<div class="flow-section"><h4>Presença digital</h4>${checkRows}</div><div class="flow-next"><strong>${esc(nextTitle)}</strong><p>${esc(nextText)}</p>${nextAction}</div>${salesProgress}${projectProgress}`;
+}
+
+async function retryLeadVerification(id) {
+  try {
+    const response=await fetch('/api/agent-runtime/verify-leads',{method:'POST',headers:{'Content-Type':'application/json','X-Central-Action':'verify'},body:JSON.stringify({leadIds:[id]})});
+    const data=await response.json();if(!response.ok)throw new Error(data.error);
+    await hydrateLocalState(true);toast('Lead colocado na fila de pesquisa. A ficha será atualizada automaticamente.');
+  }catch(error){toast(error.message||'Não consegui iniciar a pesquisa. Confira o executor local.');}
+}
+
+function refreshOpenLeadVerification(previous) {
+  const form=el('#edit-lead-form'),lead=leadById(form?.dataset.leadId);
+  if(!lead)return;
+  const old=previous?.leads.find(item=>item.id===lead.id);
+  for(const field of ['website','websiteUrl','maps','mapsUrl','instagramStatus','instagramUrl','instagramActivity','instagramActivityEvidence']) {
+    const control=form.elements.namedItem(field);
+    if(control && control.value===String(old?.[field]||''))control.value=lead[field]||'';
+  }
+  const project=state.projects.find(item=>item.leadId===lead.id);
+  const links=[['Google Maps',mapsSearchUrl(lead)],['Site',safeUrl(lead.websiteUrl)],['Instagram',safeUrl(lead.instagramUrl)]].filter(([,url])=>url);
+  el('.lead-link-list',form).innerHTML=links.map(([label,url])=>`<a class="lead-link-button" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Abrir ${label} ↗</a>`).join('');
+  el('.lead-workflow',form).innerHTML=renderLeadWorkflow(lead,messageByLead(lead.id),project,lead.instagramStatus,lead.instagramActivity);
+  bindLeadWorkflow(lead.id,project);
 }
 
 function createProjectFromLead(id) {
@@ -1709,6 +1753,7 @@ function saveLeadDetails(event) {
   const form = new FormData(event.currentTarget);
   const lead = leadById(event.currentTarget.dataset.leadId);
   if (!lead) return;
+  const beforePresence=structuredClone(lead);
   const websiteUrl = String(form.get('websiteUrl') || '').trim();
   const mapsUrl = String(form.get('mapsUrl') || '').trim();
   const instagramUrl = String(form.get('instagramUrl') || '').trim();
@@ -1724,6 +1769,7 @@ function saveLeadDetails(event) {
   if (lead.instagramStatus === 'Não encontrado') lead.instagramActivity = 'Não se aplica · perfil não encontrado';
   lead.instagramActivityEvidence = String(form.get('instagramActivityEvidence') || '').trim();
   lead.instagramCheckedAt = lead.instagramActivity !== 'Não verificado' ? (lead.instagramCheckedAt || isoDate(Date.now())) : '';
+  markManualPresence(lead,beforePresence);
   lead.heat = Math.max(0, Math.min(100, Number(form.get('heat')) || 0));
   const previousStage = lead.stage;
   const nextStage = String(form.get('stage'));
