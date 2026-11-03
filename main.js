@@ -1,5 +1,6 @@
 import './styles.css';
 import { createOperations } from './operations.js';
+import { createWhatsAppWorkspace } from './whatsapp-workspace.js';
 
 const STORAGE_KEY = 'central-comercial-ia:v1';
 const ASSISTANT_CHAT_STORAGE = 'central-comercial-ia:assistant-chat:v1';
@@ -122,7 +123,11 @@ const AGENT_ROLES = [
   ['pesquisa', 'Pesquisador web', 'Pesquisa fontes públicas com o Codex e apresenta os links para revisão.', ['86%', '49%']]
 ];
 
-const isLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+const isDesktopLoopback = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+const isLocalHost = isDesktopLoopback || window.__CENTRAL_LOCAL_GATEWAY__ === true;
+let localHydrated=false, localRevision=0, localDirty=false, localSaveBusy=false, localSaveBlocked=false, localSaveError='';
+let localSaveTimer;
+let remoteAccessStatus={phase:'stopped',email:'',url:''};
 let remoteConnectionState = isLocalHost ? 'local' : 'checking';
 
 function loadState() {
@@ -162,6 +167,7 @@ function persist() {
   ensureLeadPresenceFields(state);
   ensureLeadDrafts(state);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (isLocalHost) { localDirty=true; if(localHydrated && !localSaveBlocked) { clearTimeout(localSaveTimer);localSaveTimer=setTimeout(syncLocalState,350); } }
   if (!isLocalHost && remoteHydrated) {
     clearTimeout(syncTimer);
     syncTimer = setTimeout(syncRemoteState, 250);
@@ -301,6 +307,38 @@ async function hydrateRemoteState() {
     toast(remoteConnectionState === 'login-required' ? 'Faça login pelo Cloudflare Access para carregar os dados online.' : 'Não foi possível conectar ao banco online. Tente novamente em instantes.');
   }
 }
+async function hydrateLocalState(poll=false) {
+  try {
+    const response=await fetch('/api/local-state',{cache:'no-store'});
+    const data=await response.json(); if(!response.ok) throw new Error(data.error);
+    if(poll && (localDirty || localSaveBusy || localSaveBlocked)) return;
+    if(!data.state) {
+      if(!isDesktopLoopback) throw new Error('Abra primeiro o painel no PC para carregar seus leads.');
+      localRevision=data.revision;localHydrated=true;localDirty=true;await syncLocalState();return;
+    }
+    if(poll && data.revision===localRevision) return;
+    if(!poll && state.leads.length) localStorage.setItem('central-before-shared-crm',JSON.stringify(state));
+    state=data.state;localRevision=data.revision;localHydrated=true;localDirty=false;localSaveError='';
+    state.calendarItems ||= [];state.dailyPlans ||= [];state.dailyReviews ||= [];state.settings ||= {theme:'dark'};
+    ensureLeadPresenceFields(state);ensureLeadDrafts(state);operations.resetTracking();
+    localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
+    if(!leadById(currentLeadId))currentLeadId=state.leads[0]?.id;
+    applyTheme();renderShell();renderPages();
+  } catch { localSaveError='Os dados continuam neste navegador. Inicie o executor local para compartilhar e salvar o CRM no PC.';if(!poll)renderPages(); }
+}
+async function syncLocalState() {
+  if(!localHydrated || localSaveBusy || localSaveBlocked || !localDirty)return;
+  localSaveBusy=true;localDirty=false;
+  const snapshot=structuredClone(state);
+  try {
+    const response=await fetch('/api/local-state',{method:'PUT',headers:{'Content-Type':'application/json','X-Central-Action':'crm'},body:JSON.stringify({revision:localRevision,state:snapshot})});
+    const data=await response.json();
+    if(response.status===409){localStorage.setItem('central-crm-conflict-backup',JSON.stringify(state));localSaveBlocked=true;localSaveError='Suas alterações foram preservadas em um backup neste navegador. Carregue os dados atuais antes de continuar.';renderPages();return;}
+    if(!response.ok)throw new Error(data.error);
+    localRevision=data.revision;localSaveError='';
+  } catch { localDirty=true;localSaveError='Não consegui salvar no PC. Suas alterações continuam neste navegador; vou tentar novamente.'; }
+  finally {localSaveBusy=false;if(localDirty&&!localSaveBlocked){clearTimeout(localSaveTimer);localSaveTimer=setTimeout(syncLocalState,3000);}}
+}
 async function syncRemoteState() {
   if (isLocalHost || !remoteHydrated) return;
   try {
@@ -331,10 +369,8 @@ function renderLocalWhatsAppSettings() {
   const labels = { disconnected: 'Desconectado', starting: 'Abrindo conexão…', qr: 'Leia o QR Code', authenticating: 'Confirmando no celular…', ready: 'Conectado', error: 'Precisa de atenção' };
   return `<article class="settings-card whatsapp-settings local-whatsapp"><div class="whatsapp-settings-heading"><div><h2>WhatsApp neste computador</h2><p>Conecte como um aparelho vinculado. Só as mensagens de telefones cadastrados nos seus leads entram no painel.</p></div><span class="status-badge ${whatsappStatus.connected ? 'green' : 'yellow'}">${esc(labels[whatsappStatus.state] || 'Desconectado')}</span></div>${whatsappStatus.qrDataUrl?.startsWith('data:image/png;base64,') ? `<div class="wa-qr-step"><img src="${whatsappStatus.qrDataUrl}" width="288" height="288" alt="QR Code para conectar seu WhatsApp"><ol><li>Abra o WhatsApp no celular.</li><li>Entre em Aparelhos conectados.</li><li>Toque em Conectar um aparelho e leia este código.</li></ol></div>` : ''}${whatsappStatus.connected ? `<p>Conexão ativa${whatsappStatus.account ? ` · final ${esc(whatsappStatus.account.slice(-4))}` : ''}. Abra Conversas para revisar e responder.</p>` : '<p>O QR pode levar alguns segundos para aparecer. Se a sessão já estiver salva, ela será restaurada ao conectar.</p>'}${whatsappStatus.error ? `<p class="modal-note" role="alert">${esc(whatsappStatus.error)}</p>` : ''}<div class="settings-actions"><button type="button" class="primary-btn" data-wa-local="connect" ${['starting','qr','authenticating','ready'].includes(whatsappStatus.state)?'disabled':''}>Conectar WhatsApp</button><button type="button" class="ghost-btn" data-wa-local="disconnect">Desconectar / gerar outro QR</button><button type="button" class="ghost-btn" data-page="messages">Abrir conversas</button></div><p class="field-help">Conexão não oficial do WhatsApp Web. O computador precisa ficar ligado; a sessão pode desconectar ou sofrer restrições do WhatsApp. A IA prepara sugestões, e você confirma cada envio.</p></article>`;
 }
-function renderWhatsAppWorkspace() {
-  const contacts = state.messages.map(message => ({ message, lead: leadById(message.leadId) })).filter(({lead}) => lead?.phone);
-  return `<div class="work-page"><div class="work-heading"><h1>WhatsApp</h1><p>Conecte seu celular e acompanhe as conversas dos leads neste computador.</p></div>${isLocalHost ? renderLocalWhatsAppSettings() : '<p class="modal-note">A conexão por QR roda no computador. Abra a versão local pelo START-LOCAL.cmd. A integração oficial online continua em Configurações.</p>'}<section class="work-content"><div class="work-toolbar"><h2>Conversas dos seus leads</h2><span class="status-badge ${whatsappStatus.connected?'green':'yellow'}">${whatsappStatus.connected?'Recebimento ativo':'Conecte para receber novas mensagens'}</span></div><p>A sessão salva é restaurada quando o executor local inicia. As novas mensagens de telefones cadastrados entram aqui; áudios e imagens precisam ser conferidos no WhatsApp.</p><div class="work-list">${contacts.map(({message,lead})=>{const last=message.conversation?.at(-1), status=messageListStatus(message,lead);return `<article class="work-row"><div><strong>${esc(lead.name)}</strong><p><span class="message-item-status ${status.className}">${esc(status.label)}</span></p><small>${esc(last?.text?.slice(0,170)||lead.phone)}</small></div><button type="button" class="ghost-btn" data-wa-conversation="${esc(lead.id)}">Abrir conversa</button></article>`;}).join('')||'<p>Cadastre o telefone dos leads para vincular as conversas. Suas conversas pessoais não entram nesta lista.</p>'}</div></section></div>`;
-}
+function renderWhatsAppWorkspace() { return isLocalHost ? whatsappWorkspace.render() : '<h1>WhatsApp</h1><p>Abra o painel do computador para usar a conexão por QR.</p>'; }
+
 async function localWhatsAppAction(action) {
   if (action === 'disconnect' && !confirm('Desconectar esta sessão do WhatsApp?')) return;
   try {
@@ -364,6 +400,33 @@ async function sendLocalInitial(id) {
   } catch(error) { toast(error.message); }
   finally { whatsappSending = false; renderPages(); }
 }
+async function analyzeWhatsAppThread(lead,events) {
+  const last=[...events].reverse().find(item=>item.role==='cliente');
+  if(!last)throw new Error('Sincronize uma mensagem recebida antes de pedir a sugestão.');
+  const message=messageByLead(lead.id);
+  const response=await fetch('/api/agent-runtime/customer-reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lead,initialMessage:message?.text,initialWasSent:!!message?.sentAt,conversation:events.filter(e=>e!==last).slice(-16),customerReply:last.text,currentDate:localDateKey(today()),projects:state.projects.filter(p=>p.leadId===lead.id)})});
+  const result=await response.json();if(!response.ok)throw new Error(result.error||'A IA não conseguiu analisar a conversa.');
+  if(!result.reply)throw new Error('A IA não devolveu uma sugestão.');
+  message.conversation ||= [];message.conversation.push({role:'sugestao',status:'rascunho',source:'whatsapp-ai',text:removeEmojis(result.reply),createdAt:isoDate(Date.now())});
+  if(!CLOSED_LEAD_STAGES.includes(lead.stage)&&['respondeu','interessado','perdido','nao-contatar'].includes(result.nextStage)){lead.stage=result.nextStage;lead.responseDue=null;clearLeadFollowUp(lead.id);}
+  operations.audit('Resposta sugerida para WhatsApp',lead.name,'Codex local');persist();applyOrchestrationResult(result);
+  return removeEmojis(result.reply);
+}
+async function sendWhatsAppThread(lead,text) {
+  if(['perdido','nao-contatar'].includes(lead.stage))throw new Error('Contato encerrado. Revise a ficha do lead.');
+  const blocked=operations.canSend(lead.id);if(blocked)throw new Error(blocked);
+  await syncWhatsAppContacts();
+  const response=await fetch('/api/whatsapp/send',{method:'POST',headers:{'Content-Type':'application/json','X-Central-Action':'whatsapp'},body:JSON.stringify({leadId:lead.id,phone:lead.phone,text,confirmed:true})});
+  const result=await response.json();if(!response.ok)throw new Error(result.error||'Envio não confirmado. Confira o WhatsApp antes de tentar novamente.');
+  const message=messageByLead(lead.id);
+  message.conversation ||= [];
+  const draft=[...message.conversation].reverse().find(m=>m.source==='whatsapp-ai'&&m.status==='rascunho');
+  const event={role:'operador',status:'enviada',source:'whatsapp',text,createdAt:result.occurredAt,sentAt:result.occurredAt,whatsappMessageId:result.whatsappMessageId};
+  if(draft)Object.assign(draft,event);else message.conversation.push(event);
+  if(!message.sentAt){message.sentAt=result.occurredAt;lead.stage='contatado';scheduleLeadFollowUp(message,lead,Date.parse(result.occurredAt));}
+  lead.responseDue=daysFromNow(7);operations.sent(lead.id);persist();
+  await refreshWhatsAppInbox();
+}
 async function refreshWhatsAppInbox() {
   if ((!isLocalHost && !remoteHydrated) || !whatsappStatus.connected || whatsappInboxBusy) return;
   whatsappInboxBusy = true;
@@ -386,14 +449,14 @@ async function refreshWhatsAppInbox() {
         text: item.body,
         createdAt: item.occurredAt,
         sentAt: item.direction === 'outbound' ? item.occurredAt : undefined,
-        whatsappMessageId: item.whatsappMessageId,
+        whatsappMessageId: item.whatsappMessageId, historical: !!item.historical, source:'whatsapp',
       });
-      if (item.direction === 'inbound' && !['ganho', 'perdido', 'nao-contatar'].includes(lead.stage)) {
+      if (!item.historical && item.direction === 'inbound' && !['ganho', 'perdido', 'nao-contatar'].includes(lead.stage)) {
         if (['novo','verificar','qualificado','mensagem','aprovacao','contatado'].includes(lead.stage)) lead.stage = 'respondeu';
         lead.responseDue = null;
         clearLeadFollowUp(lead.id);
       }
-      if (item.direction === 'outbound') {
+      if (!item.historical && item.direction === 'outbound') {
         if (!conversation.sentAt) { conversation.sentAt = item.occurredAt; if (['novo','verificar','qualificado','mensagem','aprovacao'].includes(lead.stage)) lead.stage = 'contatado'; scheduleLeadFollowUp(conversation,lead,Date.parse(item.occurredAt)); }
         if (!['ganho','perdido','nao-contatar'].includes(lead.stage)) lead.responseDue = isoDate(Date.parse(item.occurredAt) + 7 * 86400000);
         operations.sent(lead.id);
@@ -517,7 +580,7 @@ function renderShell() {
           ${navItem('services', '◇', 'Serviços')}
           ${navItem('settings', '⚙', 'Configurações')}
         </nav></div>
-        <div class="sidebar-footer"><div class="mini-status"><span class="status-dot ${isLocalHost ? 'local' : remoteHydrated ? 'connected' : ['login-required', 'unavailable'].includes(remoteConnectionState) ? 'attention' : 'checking'}"></span>${isLocalHost ? 'Somente neste dispositivo' : remoteHydrated ? 'Dados sincronizados online' : remoteConnectionState === 'login-required' ? 'Login necessário' : remoteConnectionState === 'unavailable' ? 'Banco indisponível' : 'Conectando ao banco'}</div><p>${isLocalHost ? 'Este endereço local não compartilha dados com o celular.' : remoteHydrated ? 'Cloudflare D1 ativo. Use o mesmo endereço online nos seus dispositivos.' : remoteConnectionState === 'login-required' ? 'Conclua o login do Cloudflare Access para carregar seus dados.' : remoteConnectionState === 'unavailable' ? 'Confira sua conexão e tente atualizar a página.' : 'Validando seu acesso e carregando os dados online.'}</p>${isLocalHost ? '<a class="sidebar-online-link" href="https://central-comercial-ia.pages.dev/" target="_blank" rel="noopener noreferrer">Abrir painel online ↗</a>' : ''}</div>
+        <div class="sidebar-footer"><div class="mini-status"><span class="status-dot ${isLocalHost ? 'local' : remoteHydrated ? 'connected' : ['login-required', 'unavailable'].includes(remoteConnectionState) ? 'attention' : 'checking'}"></span>${isLocalHost ? (isDesktopLoopback?'CRM salvo neste PC':'Conectado ao seu PC') : remoteHydrated ? 'Dados sincronizados online' : remoteConnectionState === 'login-required' ? 'Login necessário' : remoteConnectionState === 'unavailable' ? 'Banco indisponível' : 'Conectando ao banco'}</div><p>${isLocalHost ? 'Use Acesso pelo celular para abrir este mesmo CRM fora do computador.' : remoteHydrated ? 'Cloudflare D1 ativo. Use o mesmo endereço online nos seus dispositivos.' : remoteConnectionState === 'login-required' ? 'Conclua o login do Cloudflare Access para carregar seus dados.' : remoteConnectionState === 'unavailable' ? 'Confira sua conexão e tente atualizar a página.' : 'Validando seu acesso e carregando os dados online.'}</p>${isDesktopLoopback ? '<button class="detail-link" data-page="settings" type="button">Acesso pelo celular →</button>' : ''}</div>
       </aside>
       <main class="main">
         <header class="topbar"><div class="breadcrumb">Central <span>/</span> <strong id="breadcrumb-current">Visão geral</strong></div><div class="top-actions"><button class="ghost-btn theme-toggle" data-action="toggle-theme"><span class="theme-icon">☼</span><span class="theme-label">Modo claro</span></button><button class="ghost-btn" data-action="export">↓ Exportar dados</button><button class="primary-btn" data-action="new-lead">+ Novo lead</button></div></header>
@@ -780,7 +843,9 @@ function navItem(page, icon, label) { return `<button class="nav-item ${currentP
 function pageHeader(kicker, title, lede, action = '') { return `<div class="page-heading"><div><p class="page-kicker">${kicker}</p><h1>${title}</h1><p class="lede">${lede}</p></div>${action}</div>`; }
 
 function renderPages() {
+  const waFocus=document.activeElement?.id==='wa-compose'?{start:document.activeElement.selectionStart,end:document.activeElement.selectionEnd}:null;
   el('#pages').innerHTML = `
+    ${isLocalHost && (localSaveBlocked || localSaveError) ? `<div class="work-notice" role="alert"><strong>${localSaveBlocked?'Há alterações em outro aparelho':'CRM do computador indisponível'}</strong><p>${esc(localSaveError)}</p><button class="ghost-btn" data-reload-local-state>Carregar dados atuais</button></div>`:''}
     <section class="page ${currentPage === 'overview' ? 'active' : ''}" data-page-view="overview">${operations.brief()}${renderOverview()}</section>
     <section class="page ${currentPage === 'leads' ? 'active' : ''}" data-page-view="leads">${renderLeads()}</section>
     <section class="page ${currentPage === 'projects' ? 'active' : ''}" data-page-view="projects">${renderProjects()}</section>
@@ -793,6 +858,7 @@ function renderPages() {
     <section class="page ${currentPage === 'operations' ? 'active' : ''}" data-page-view="operations">${operations.render()}</section>`;
   el('#breadcrumb-current').textContent = { whatsapp: 'WhatsApp', operations: 'Central de trabalho', overview: 'Visão geral', leads: 'Prospecção', projects: 'Projetos', calendar: 'Calendário', messages: 'Conversas', agents: 'Agentes', services: 'Serviços', settings: 'Configurações' }[currentPage];
   bindPageEvents();
+  if(waFocus && currentPage==='whatsapp'){const input=el('#wa-compose');input?.focus();input?.setSelectionRange(waFocus.start,waFocus.end);}
 }
 
 function renderOverview() {
@@ -1118,7 +1184,7 @@ function renderServices() { return `${pageHeader('Catálogo comercial', 'Uma ofe
   function renderSettings() {
     const online = !isLocalHost && remoteHydrated;
     const accessCard = isLocalHost
-      ? `<article class="settings-card access-guide"><span class="status-badge green">Painel local</span><h2>IAs e WhatsApp neste computador</h2><p>Conecte seu WhatsApp pelo QR Code abaixo. O executor Codex prepara análises e respostas usando seu plano. Seus dados ficam neste navegador.</p><button type="button" class="ghost-btn" data-page="operations">Ver integrações e tarefas</button></article>`
+      ? `<article class="settings-card access-guide"><span class="status-badge green">Painel local</span><h2>IAs e WhatsApp neste computador</h2><p>Conecte seu WhatsApp pelo QR Code abaixo. O executor Codex prepara análises e respostas usando seu plano. O CRM fica salvo no computador e pode ser acessado pelo link protegido.</p><button type="button" class="ghost-btn" data-page="operations">Ver integrações e tarefas</button></article>`
       : online
         ? `<article class="settings-card access-guide access-guide-online"><span class="status-badge green">Acesso confirmado</span><h2>Você está no painel sincronizado</h2><p>Seu login foi aceito e os dados foram carregados do banco online. Acesse este mesmo endereço no computador e no celular para compartilhar o CRM.</p><a class="ghost-btn" href="https://central-comercial-ia.pages.dev/" target="_blank" rel="noopener noreferrer">Abrir endereço online ↗</a></article>`
         : `<article class="settings-card access-guide access-guide-pending"><span class="status-badge ${remoteConnectionState === 'login-required' ? 'yellow' : 'blue'}">${remoteConnectionState === 'login-required' ? 'Login não confirmado' : remoteConnectionState === 'unavailable' ? 'Conexão pendente' : 'Conectando'}</span><h2>${remoteConnectionState === 'login-required' ? 'Entre para carregar seus dados' : 'Carregando o painel online'}</h2><p>${remoteConnectionState === 'login-required' ? 'Conclua o acesso na tela do Cloudflare Access. Use o e-mail autorizado e volte a esta página. Seus dados online só aparecem depois da confirmação.' : remoteConnectionState === 'unavailable' ? 'Não foi possível alcançar o banco online. Confira a conexão e tente novamente.' : 'Estamos validando seu acesso e buscando os dados compartilhados.'}</p><button class="ghost-btn" type="button" data-action="retry-online">Tentar novamente</button></article>`;
@@ -1137,7 +1203,7 @@ function renderServices() { return `${pageHeader('Catálogo comercial', 'Uma ofe
     }).join('');
     const webhookUrl = online ? whatsappStatus.webhookUrl : 'Disponível no domínio publicado do painel';
     return `${pageHeader(online ? 'Painel online' : isLocalHost ? 'Acesso e dados' : 'Painel online', online ? 'Seus dados estão sincronizados.' : isLocalHost ? 'Conecte seu WhatsApp e organize o trabalho.' : remoteConnectionState === 'login-required' ? 'Faça login para ver seus dados.' : 'Conectando ao banco online.', online ? 'O CRM está carregado e pode ser usado em outros dispositivos pelo mesmo endereço.' : isLocalHost ? 'Este é o painel local com as IAs do Codex. Conecte seu celular para trazer as conversas dos leads.' : 'Esta tela mostra o estado do login e da conexão com seus dados.')}
-      <div class="settings-grid">${accessCard}<article class="settings-card"><h2>${online ? 'Armazenamento online' : 'Backup deste dispositivo'}</h2><p>${online ? 'Leads, projetos e mensagens são carregados do Cloudflare D1 e atualizados após cada alteração.' : 'Exportar cria uma cópia de segurança dos dados deste navegador. Esse arquivo não transfere os dados automaticamente para o painel online.'}</p><div class="settings-actions"><button class="primary-btn" data-action="export">↓ Exportar backup</button>${isLocalHost ? '' : '<button class="ghost-btn" data-action="reset">Restaurar demonstração</button>'}</div></article>
+      <div class="settings-grid">${renderRemoteAccessCard()}${accessCard}<article class="settings-card"><h2>${online ? 'Armazenamento online' : 'Backup deste dispositivo'}</h2><p>${online ? 'Leads, projetos e mensagens são carregados do Cloudflare D1 e atualizados após cada alteração.' : 'Exportar cria uma cópia de segurança dos dados deste navegador. Esse arquivo não transfere os dados automaticamente para o painel online.'}</p><div class="settings-actions"><button class="primary-btn" data-action="export">↓ Exportar backup</button>${isLocalHost ? '' : '<button class="ghost-btn" data-action="reset">Restaurar demonstração</button>'}</div></article>
       ${isLocalHost ? '<article class="settings-card"><h2>WhatsApp local</h2><p>A conexão por QR e o estado da sessão ficam na área WhatsApp do menu.</p><button type="button" class="primary-btn" data-page="whatsapp">Abrir WhatsApp</button></article>' : `<article class="settings-card whatsapp-settings"><div class="whatsapp-settings-heading"><div><h2>WhatsApp oficial</h2><p>Conexão oficial pela WhatsApp Business Platform da Meta.</p></div><span class="status-badge ${whatsappStatus.connected ? 'green' : isLocalHost ? 'blue' : 'yellow'}">${whatsappStatus.connected ? 'API conectada' : isLocalHost ? 'Consulte no online' : 'Configuração pendente'}</span></div>
         ${isLocalHost ? '<p>O webhook e o envio oficial ficam disponíveis no domínio online publicado, não no localhost.</p>' : ''}
         <div class="whatsapp-config-list">${configRows}</div><div class="whatsapp-webhook"><span>URL do webhook</span><code>${esc(webhookUrl)}</code></div>
@@ -1150,6 +1216,9 @@ function renderServices() { return `${pageHeader('Catálogo comercial', 'Uma ofe
 function bindShellEvents() { all('[data-page]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.page))); all('[data-action="new-lead"]').forEach((button) => button.addEventListener('click', openLeadModal)); all('[data-action="export"]').forEach((button) => button.addEventListener('click', exportData)); all('[data-action="toggle-theme"]').forEach((button) => button.addEventListener('click', toggleTheme)); }
 function bindPageEvents() {
   operations.bind();
+  whatsappWorkspace.bind();
+  all('[data-remote-action]').forEach(button=>button.addEventListener('click',()=>remoteAccessAction(button.dataset.remoteAction)));
+  el('[data-reload-local-state]')?.addEventListener('click', () => { localStorage.setItem('central-crm-conflict-backup',JSON.stringify(state));localSaveBlocked=false;localDirty=false;void hydrateLocalState(); });
   all('[data-enable-agenda-notifications]').forEach(button => button.addEventListener('click', operations.enableNotifications));
   all('[data-wa-conversation]').forEach(button => button.addEventListener('click', () => { currentLeadId=button.dataset.waConversation; currentMessageId=messageByLead(currentLeadId)?.id; navigate('messages'); }));
   all('[data-wa-local]').forEach(button => button.addEventListener('click', () => localWhatsAppAction(button.dataset.waLocal)));
@@ -1225,6 +1294,22 @@ function bindPageEvents() {
   }));
   all('[data-import-research-candidates]').forEach((button) => button.addEventListener('click', () => importResearchCandidates(button.dataset.importResearchCandidates)));
   el('[data-agent-run]')?.addEventListener('click', runAgents);
+}
+function renderRemoteAccessCard() {
+  if(!isDesktopLoopback)return '';
+  const info=remoteAccessStatus;
+  return `<article class="settings-card whatsapp-settings" id="remote-access-settings"><h2>Abrir este painel no celular</h2><p>O computador continua rodando as IAs e o WhatsApp. O link abaixo abre o mesmo CRM no celular e exige um código de login enviado pela Cloudflare ao e-mail autorizado.</p><label class="field"><span>E-mail que pode entrar</span><input class="field-input" type="email" id="remote-email" value="${esc(info.email||'')}" ${info.enabled?'disabled':''}></label><div class="settings-actions"><button class="primary-btn" type="button" data-remote-action="start" ${info.enabled?'disabled':''}>${info.phase==='starting'?'Criando acesso…':'Ativar acesso pelo celular'}</button><button class="ghost-btn" type="button" data-remote-action="stop" ${!info.enabled?'disabled':''}>Desativar acesso</button></div>${info.url?`<div class="wa-qr-step">${info.qrDataUrl?`<img width="220" height="220" src="${info.qrDataUrl}" alt="QR para abrir o painel protegido no celular">`:''}<div><a href="${esc(info.url)}/#whatsapp" target="_blank" rel="noopener noreferrer">${esc(info.url)}</a><p>Leia este QR com a câmera do celular e faça login com o e-mail acima.</p><button class="ghost-btn" type="button" data-remote-action="copy">Copiar link</button></div></div>`:''}${info.error?`<p role="alert">${esc(info.error)}</p>`:''}<p class="field-help">Link temporário: muda quando o túnel reinicia e funciona enquanto o PC e o executor estiverem ligados. Para um endereço fixo, será necessário configurar um domínio.</p></article>`;
+}
+async function refreshRemoteAccess() {
+  try {const response=await fetch('/api/remote-access/status',{cache:'no-store'});if(!response.ok)return;const next=await response.json();const changed=JSON.stringify(next)!==JSON.stringify(remoteAccessStatus);remoteAccessStatus=next;if(changed&&currentPage==='settings'&&document.activeElement?.id!=='remote-email')renderPages();}catch{}
+}
+async function remoteAccessAction(action) {
+  try {
+    if(action==='copy'){await navigator.clipboard.writeText(`${remoteAccessStatus.url}/#whatsapp`);toast('Link protegido copiado.');return;}
+    if(action==='stop'&&!confirm('Desativar o acesso pelo celular? O painel local continuará disponível.'))return;
+    const response=await fetch(`/api/remote-access/${action}`,{method:'POST',headers:{'Content-Type':'application/json','X-Central-Action':'remote'},body:JSON.stringify({email:el('#remote-email')?.value.trim()})});
+    const data=await response.json();if(!response.ok)throw new Error(data.error);remoteAccessStatus=data;renderPages();
+  }catch(error){toast(error.message);}
 }
 async function refreshAgentRuntime(shouldRender = true) {
   const wasConnected = agentRuntime.connected;
@@ -1894,11 +1979,13 @@ function resetData() { if (!confirm('Restaurar os dados de demonstração? Seus 
 function toast(message) { const node = el('#toast'); if (!node) return; node.textContent = message; node.classList.add('show'); clearTimeout(window.__toastTimer); window.__toastTimer = setTimeout(() => node.classList.remove('show'), 3400); }
 
 const operations = createOperations({ getState: () => state, save: persist, refresh: renderPages, toast, stages: LEAD_STAGES, aiAvailable: () => isLocalHost && agentRuntime.connected, stageLabel, modal, closeModal, chat: text => { assistantOpen = true; renderAssistant(); void sendAssistantMessage(text); }, openConversation: id => { currentLeadId = id; currentMessageId = messageByLead(id)?.id; navigate('messages'); } });
+const whatsappWorkspace=createWhatsAppWorkspace({ state:()=>state,status:()=>whatsappStatus,mobileAvailable:()=>isDesktopLoopback,openMobile:()=>{navigate('settings');el('#remote-access-settings')?.scrollIntoView({behavior:'smooth',block:'start'});},stage:stageLabel,connection:renderLocalWhatsAppSettings,refresh:renderPages,aiAvailable:()=>agentRuntime.connected,openLead:openLeadDetail,openConversation:id=>{currentLeadId=id;currentMessageId=messageByLead(id)?.id;navigate('messages');},sync:async()=>{await syncWhatsAppContacts();const r=await fetch('/api/whatsapp/sync',{method:'POST',headers:{'X-Central-Action':'whatsapp'}});const result=await r.json();if(!r.ok)throw new Error(result.error);await refreshWhatsAppStatus();},analyze:analyzeWhatsAppThread,send:sendWhatsAppThread });
 operations.track();
 applyTheme();
 renderShell();
 renderPages();
 hydrateRemoteState();
+if(isLocalHost) void hydrateLocalState();
 if (isLocalHost) {
   const automaticallyClosed = closeExpiredUnansweredLeads(state);
   if (automaticallyClosed) {
@@ -1935,3 +2022,7 @@ if (isLocalHost) {
 setInterval(() => operations.notifyDue(), 60000);
 
 setInterval(() => { if (isLocalHost && document.visibilityState === 'visible' && currentPage !== 'agents') void refreshAgentRuntime(false); }, 10000);
+
+setInterval(() => { if(isLocalHost && !localHydrated && document.visibilityState==='visible'){void hydrateLocalState();return;} if(isLocalHost && document.visibilityState==='visible' && !localDirty && !localSaveBusy && !localSaveBlocked && !assistantBusy && !customerReplyBusy && !document.querySelector('.page.active [aria-busy="true"]') && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)) void hydrateLocalState(true); }, 5000);
+
+if(isDesktopLoopback){void refreshRemoteAccess();setInterval(()=>{if(document.visibilityState==='visible')void refreshRemoteAccess();},5000);}

@@ -7,3 +7,4 @@ dist/
 *.log
 .wwebjs_cache/
 .wwebjs_auth/
+.local-tools/

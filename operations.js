@@ -142,5 +142,5 @@ export function createOperations(api) {
     let changed=false;for(const item of reminders){const timestamp=Date.parse(item.date),key=`${item.id}|${item.date}`;if(timestamp>=now-15*60000 && timestamp<=now+15*60000 && !d.notifications.includes(key)){new Notification(item.title,{body:'Compromisso próximo. Abra o calendário da Central para ver os detalhes.',tag:key});d.notifications.push(key);changed=true;}}
     if(changed){d.notifications=d.notifications.slice(-1000);api.save();}
   }
-  return {enableNotifications,notifyDue,render,bind,brief,audit,track,instruction,canSend,sent,followUpDelay:()=>data().followUp.days,followUpDraft:message=>data().followUp[message.followUpVariant==='B'?'messageB':'messageA']||''};
+  return {resetTracking:()=>{baseline=undefined;track();},enableNotifications,notifyDue,render,bind,brief,audit,track,instruction,canSend,sent,followUpDelay:()=>data().followUp.days,followUpDraft:message=>data().followUp[message.followUpVariant==='B'?'messageB':'messageA']||''};
 }

@@ -57,3 +57,11 @@ The WhatsApp menu beside Conversations connects a separate local WhatsApp Web se
 Central de trabalho provides an actionable queue, campaigns with manual membership and unsent A/B draft distribution, a versioned instruction flow, configurable follow-up reminders, silent-lead recovery, factual counters, bounded activity history and an AI integration map. Optional browser agenda notifications need a user grant and an open page.
 
 AI suggestions for campaigns, flow, follow-ups, recovery and next steps use the authenticated local Codex CLI. The existing seven-agent analysis and calendar orchestration remain connected. No automatic customer replies, media transcription, LP publication, social publishing or public-site Codex execution are enabled.
+
+## WhatsApp workspace and protected mobile preparation (0.6.43)
+
+WhatsApp has its own split inbox: synchronized messages, CRM contacts, search, editable drafts, Codex suggestions and confirmed sends. Historical messages never advance sales stages automatically. Only CRM contacts are read; media remain placeholders. Availability of old history is determined by WhatsApp and is reported rather than fabricated.
+
+The PC-local CRM is persisted with revisions and rotating backups. Loopback desktop browsers can seed existing records; a mobile gateway cannot seed an empty workspace. Conflicting writes preserve a browser backup and require reload instead of overwriting newer records.
+
+A compiled-app gateway and Cloudflare Quick Tunnel with email PIN authentication have been implemented and tested locally. External tunnel activation was blocked by automatic approval review and is awaiting explicit owner authorization. There is no unprotected tunnel fallback. Downloading cloudflared does not start exposure. When authorized, the temporary URL leads to the PC, where Codex, WhatsApp and CRM continue running; Pages remains separate.

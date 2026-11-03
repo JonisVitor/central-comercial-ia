@@ -4,12 +4,16 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { handleWhatsAppLocal, restoreWhatsAppLocal } from './whatsapp-local.mjs';
+import { handleWhatsAppLocal, restoreWhatsAppLocal, updateWhatsAppContacts } from './whatsapp-local.mjs';
+import { createLocalStateStore } from './local-state.mjs';
+import { createRemoteAccess } from './remote-access.mjs';
 
 const RUNTIME_STARTED_AT = new Date().toISOString();
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HOST = '127.0.0.1';
+const remoteAccess = createRemoteAccess(ROOT);
 const PORT = Number(process.env.AGENT_RUNTIME_PORT || 4174);
+const localStateStore = createLocalStateStore(process.env.AGENT_RUNTIME_DATA_DIR ? path.join(process.env.AGENT_RUNTIME_DATA_DIR, 'crm') : undefined);
 const UI_ORIGINS = new Set(['http://127.0.0.1:4173', 'http://localhost:4173', 'http://127.0.0.1:4175', 'http://localhost:4175']);
 const DATA_DIR = process.env.AGENT_RUNTIME_DATA_DIR || path.join(os.tmpdir(), 'CentralComercialIA');
 const RUNS_FILE = path.join(DATA_DIR, 'agent-runs.json');
@@ -63,7 +67,7 @@ async function saveHistory() {
   await fs.mkdir(DATA_DIR, { recursive: true });
   await fs.writeFile(RUNS_FILE, JSON.stringify(history.slice(0, 20), null, 2), 'utf8');
 }
-const snapshot = () => ({ version: '0.6.42', startedAt: RUNTIME_STARTED_AT, busy: chatBusy || replyBusy, pid: process.pid, projectRoot: ROOT, capabilities: ['operations-ai','whatsapp-qr'], connected: true, cli: 'Codex CLI local', running: Boolean(currentRun), currentRun, history: history.slice(0, 20), roles: [...DEFINITIONS.map(([id, name]) => ({ id, name, state: currentRun?.tasks.find((task) => task.id === id)?.state || 'idle' })), { id: 'pesquisa', name: 'Pesquisador web', state: currentRun?.tasks.find((task) => task.id === 'pesquisa')?.state || 'idle' }] });
+const snapshot = () => ({ version: '0.6.43', startedAt: RUNTIME_STARTED_AT, busy: chatBusy || replyBusy, pid: process.pid, projectRoot: ROOT, capabilities: ['operations-ai','whatsapp-qr'], connected: true, cli: 'Codex CLI local', running: Boolean(currentRun), currentRun, history: history.slice(0, 20), roles: [...DEFINITIONS.map(([id, name]) => ({ id, name, state: currentRun?.tasks.find((task) => task.id === id)?.state || 'idle' })), { id: 'pesquisa', name: 'Pesquisador web', state: currentRun?.tasks.find((task) => task.id === 'pesquisa')?.state || 'idle' }] });
 
 function send(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
@@ -570,6 +574,7 @@ async function executeRun(executable, leads, projects, messages) {
 }
 
 await loadHistory();
+try { const saved=await localStateStore.read();if(saved.state?.leads)updateWhatsAppContacts(saved.state.leads); } catch {}
 async function operationsAdvice(input) {
   if (chatBusy) throw new Error('O assistente já está trabalhando. Aguarde.');
   if (!['campaign', 'flow', 'recovery', 'next-step', 'follow-up'].includes(input.action)) throw new Error('Tipo de análise inválido.');
@@ -597,6 +602,19 @@ http.createServer(async (req, res) => {
   const host = String(req.headers.host || '').toLowerCase();
   if (![`${HOST}:${PORT}`, `localhost:${PORT}`, '127.0.0.1:4174', 'localhost:4174', '127.0.0.1:4173', 'localhost:4173', '127.0.0.1:4175', 'localhost:4175'].includes(host)) return send(res, 403, { error: 'Acesso local apenas.' });
   if (await handleWhatsAppLocal(req, res, readBody, send)) return;
+  if (PORT === 4174 && await remoteAccess.handle(req,res,readBody,send)) return;
+  if (req.url === '/api/local-state') {
+    try {
+      if (req.method === 'GET') {const saved=await localStateStore.read();if(saved.state?.leads)updateWhatsAppContacts(saved.state.leads);return send(res,200,saved);}
+      if (req.method === 'PUT' && req.headers['x-central-action'] === 'crm') {
+        const input = await readBody(req);
+        const result = await localStateStore.commit(input.state, input.revision, { remote: req.headers['x-central-gateway'] === 'true' });
+        if(result.status===200)updateWhatsAppContacts(input.state.leads);
+        return send(res, result.status, result);
+      }
+      return send(res, 403, {error:'Gravação não autorizada.'});
+    } catch { return send(res, 500, {error:'Não foi possível acessar o CRM salvo no computador.'}); }
+  }
   if (req.method === 'POST' && req.url === '/api/agent-runtime/operations') {
     try { return send(res, 200, await operationsAdvice(await readBody(req))); }
     catch (error) { return send(res, 400, { error: redact(error.message) }); }
@@ -615,4 +633,4 @@ http.createServer(async (req, res) => {
     catch (error) { return send(res, 400, { error: redact(error.message) }); }
   }
   return send(res, 404, { error: 'Rota não encontrada.' });
-}).listen(PORT, HOST, () => { console.log(`Executor local de agentes ativo em http://${HOST}:${PORT}`); if (PORT === 4174) void restoreWhatsAppLocal(); });
+}).listen(PORT, HOST, () => { console.log(`Executor local de agentes ativo em http://${HOST}:${PORT}`); if (PORT === 4174) { void restoreWhatsAppLocal(); void remoteAccess.restore(); } });

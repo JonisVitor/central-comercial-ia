@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 
-const proxy = { '/api/agent-runtime': { target: 'http://127.0.0.1:4174', changeOrigin: false }, '/api/whatsapp': { target: 'http://127.0.0.1:4174', changeOrigin: false } };
+const proxy = Object.fromEntries(['/api/agent-runtime','/api/whatsapp','/api/local-state','/api/remote-access'].map(route => [route, { target:'http://127.0.0.1:4174', changeOrigin:false }]));
 
 export default defineConfig({
   server: { host: '127.0.0.1', port: 4175, strictPort: true, proxy },

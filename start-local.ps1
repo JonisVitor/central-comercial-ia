@@ -43,7 +43,7 @@ if (-not (Test-Path (Join-Path $projectRoot 'node_modules'))) {
 $expectedVersion = (Get-Content (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json).version
 try {
   $runtimeInfo = Invoke-RestMethod -Uri $runtimeUrl -TimeoutSec 2
-  $newestRuntimeFile = @((Get-Item (Join-Path $projectRoot 'agents-runtime/server.mjs')).LastWriteTimeUtc, (Get-Item (Join-Path $projectRoot 'agents-runtime/whatsapp-local.mjs')).LastWriteTimeUtc, (Get-Item (Join-Path $projectRoot 'package-lock.json')).LastWriteTimeUtc) | Sort-Object -Descending | Select-Object -First 1
+  $newestRuntimeFile = @((Get-Item (Join-Path $projectRoot 'agents-runtime/server.mjs')).LastWriteTimeUtc, (Get-Item (Join-Path $projectRoot 'agents-runtime/whatsapp-local.mjs')).LastWriteTimeUtc, (Get-Item (Join-Path $projectRoot 'package-lock.json')).LastWriteTimeUtc, (Get-Item (Join-Path $projectRoot 'agents-runtime/local-state.mjs')).LastWriteTimeUtc, (Get-Item (Join-Path $projectRoot 'agents-runtime/remote-access.mjs')).LastWriteTimeUtc) | Sort-Object -Descending | Select-Object -First 1
   $runtimeOutdated = $runtimeInfo.version -ne $expectedVersion -or -not $runtimeInfo.startedAt -or ($newestRuntimeFile -gt ([datetime]$runtimeInfo.startedAt).ToUniversalTime())
   if ($runtimeInfo.cli -eq 'Codex CLI local' -and $runtimeOutdated) {
     $listener = Get-NetTCPConnection -State Listen -LocalPort 4174 -ErrorAction Stop | Select-Object -First 1

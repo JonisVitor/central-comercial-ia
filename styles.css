@@ -840,3 +840,35 @@ h3 { margin-bottom: 4px; font-size: 15px; }
 .wa-qr-step img { width: min(288px, 100%); height: auto; background: white; border-radius: 12px; }
 .wa-qr-step ol { padding-left: 24px; color: var(--text-2); line-height: 2; }
 @media (max-width: 850px) { .work-columns { grid-template-columns: 1fr; gap: 24px; } .work-row { align-items: start; flex-direction: column; gap: 12px; } .work-tabs { gap: 6px; } .work-tabs button { flex: 1 1 auto; } }
+
+.wa-workspace-heading { display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap; margin-bottom:22px; }
+.wa-workspace-heading h1 { font-size:34px; margin:0 0 8px; }
+.wa-workspace-heading p { color:var(--text-2); margin:0; line-height:1.6; }
+.wa-sync-state { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px 20px; padding:12px 0 18px; color:var(--text-2); font-size:13px; line-height:1.5; }
+.wa-inbox { display:grid; grid-template-columns:minmax(250px,31%) minmax(0,1fr); height: min(78vh,900px); min-height:600px; border:1px solid var(--border-strong); border-radius:16px; overflow:hidden; background:var(--surface); }
+.wa-chat-list { display:flex; flex-direction:column; min-height:0; min-width:0; border-right:1px solid var(--border); }
+.wa-chat-toolbar { display:grid; gap:12px; padding:18px; border-bottom:1px solid var(--border); }
+.wa-chat-toolbar .is-selected { background:var(--orange-soft); color:var(--text); }
+.wa-chat-items { overflow-y:auto; min-height:0; }
+.wa-chat-item { display:flex; align-items:center; gap:12px; padding:18px 14px; width:100%; color:var(--text); background:transparent; border:0; border-bottom:1px solid var(--border); text-align:left; }
+.wa-chat-item:hover,.wa-chat-item.selected { background:var(--surface-3); }
+.wa-contact-avatar { display:grid; place-items:center; flex:0 0 38px; height:38px; border-radius:12px; color:var(--orange); background:var(--orange-soft); font-weight:700; font-size:13px; }
+.wa-chat-summary { display:grid; gap:7px; min-width:0; }
+.wa-chat-summary strong { font-size:15px; overflow-wrap:anywhere; }
+.wa-chat-summary > span { color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }
+.wa-chat-summary small { color:var(--text-2); font-size:12px; line-height:1.5; }
+.wa-conversation { min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--control); }
+.wa-thread-heading { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:18px 22px; border-bottom:1px solid var(--border); background:var(--surface); }
+.wa-thread-heading h2 { margin:0 0 6px; font-size:20px; }
+.wa-thread-heading p { margin:0; color:var(--text-2); font-size:13px; }
+.wa-thread { flex:1; min-height:180px; display:flex; flex-direction:column; align-items:flex-start; gap:14px; overflow-y:auto; padding:24px; }
+.wa-bubble { max-width:85%; min-width:110px; padding:13px 16px; background:var(--surface-3); border-radius:12px; overflow-wrap:anywhere; }
+.wa-bubble.outgoing { align-self:flex-end; background:var(--green-soft); }
+.wa-bubble p { font-size:15px; line-height:1.65; margin:0 0 8px; color:var(--text); }
+.wa-bubble small { display:block; color:var(--text-2); font-size:11px; line-height:1.5; }
+.wa-compose { display:grid; gap:12px; border-top:1px solid var(--border); padding:18px 22px; background:var(--surface); }
+.wa-compose .field-textarea { min-height:80px; max-height:200px; font-size:15px; }
+.wa-empty { padding:24px; color:var(--text-2); line-height:1.7; max-width:65ch; }
+.wa-empty h3 { color:var(--text); font-size:20px; margin:0 0 12px; }
+@media(max-width:900px){.wa-inbox{grid-template-columns:minmax(210px,35%) minmax(0,1fr);} .wa-thread,.wa-compose,.wa-thread-heading{padding:16px;} .wa-compose .message-actions > *{flex:1 1 auto;}}
+@media(max-width:640px){.wa-inbox{display:flex;flex-direction:column;height:auto;min-height:0;} .wa-chat-list{border-right:0;border-bottom:1px solid var(--border);} .wa-chat-items{max-height:240px;} .wa-thread{height:400px;flex:auto;} .wa-thread-heading{flex-wrap:wrap;} .wa-bubble{max-width:94%;} .wa-workspace-heading .message-actions{width:100%;}.wa-workspace-heading .message-actions button{flex:1 1 auto;}}
